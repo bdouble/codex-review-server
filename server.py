@@ -1,18 +1,16 @@
 """Codex Review MCP Server.
 
-Exposes codex_review and codex_fix tools via MCP stdio transport.
-Uses Codex CLI (ChatGPT subscription auth) to access OpenAI models.
+Exposes tools for repo-aware cross-model code review via MCP stdio transport.
+Codex runs as a full agent in the target repository with complete file access —
+the same as running Codex manually.
+
+Three modes:
+- codex_review_and_fix: Review + auto-fix clear P0-P2 findings, report the rest
+- codex_review: Review-only, no fixes (for when you want findings first)
+- codex_fix: Fix specific approved findings (second pass after human review)
 
 Install:
     claude mcp add codex-review-server -- python3 /path/to/server.py
-
-Configure via environment variables:
-    CODEX_REVIEW_MODEL=gpt-5.3-codex
-    CODEX_REVIEW_REASONING=xhigh
-    CODEX_REVIEW_TIMEOUT=300
-    CODEX_REVIEW_AUTO_FIX=false
-    CODEX_REVIEW_MIN_SEVERITY=medium
-    CODEX_REVIEW_FOCUS=all
 """
 
 import sys
@@ -24,8 +22,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
 from config import Config
-from codex_runner import run_codex, CodexRateLimitError, CodexNotFoundError, CodexError
-from output_parser import parse_review_output, parse_fix_output
+from codex_runner import (
+    run_review_and_fix, run_review_only, run_fix,
+    CodexRateLimitError, CodexNotFoundError, CodexError,
+)
 
 server = FastMCP("codex-review-server")
 
@@ -35,167 +35,139 @@ for w in warnings:
     print(f"[codex-review-server] WARNING: {w}", file=sys.stderr)
 
 
-REVIEW_SYSTEM_PROMPT = """You are a senior code reviewer performing a cross-model adversarial review.
-Your job is to find issues that another AI model may have missed during implementation.
-
-Focus on: runtime bugs, edge cases, security vulnerabilities, logic errors, missing error handling,
-race conditions, null/undefined dereferences, off-by-one errors, resource leaks, and injection risks.
-
-DO NOT focus on: code style, naming conventions, formatting, minor organization preferences,
-or theoretical concerns without concrete evidence.
-
-Return your findings as a JSON array. Each finding must have:
-{
-  "severity": "critical|high|medium|low",
-  "category": "bug|security|performance|logic|edge-case",
-  "file": "path/to/file.ts",
-  "line": 42,
-  "description": "Clear description of the issue",
-  "evidence": "The specific code that demonstrates the problem",
-  "suggested_fix": "How to fix it",
-  "confidence": 0.95
-}
-
-If no issues are found, return an empty array: []
-
-Be precise. Every finding must have concrete evidence from the code. No speculation."""
+def _error_response(error_type: str, message: str, **extra) -> str:
+    """Standard error response format."""
+    return json.dumps({"error": error_type, "message": message, **extra})
 
 
-FIX_SYSTEM_PROMPT = """You are a surgical code fixer. Given a specific finding from a code review,
-generate the minimal fix that addresses the issue without changing anything else.
+@server.tool()
+def codex_review_and_fix(
+    project_dir: str,
+    base_branch: str = "main",
+    focus: str = "",
+    context: str = "",
+) -> str:
+    """Review code changes AND auto-fix clear P0-P2 findings in one pass.
 
-Return a JSON object:
-{
-  "patch": "The complete fixed version of the affected code section",
-  "explanation": "Brief explanation of what was changed and why",
-  "risk_assessment": "Low|Medium|High - assessment of fix risk",
-  "tests_to_verify": ["list of test files or test names to run"]
-}
+    Codex runs as a full agent with complete repository access. It:
+    1. Reviews all changes against the base branch
+    2. Produces prioritized findings (P0-P3)
+    3. Auto-fixes P0-P2 findings that are clear-cut (confident, obvious fix)
+    4. Reports P0-P2 findings it has questions about (does NOT fix these)
+    5. Reports P3 findings for awareness only
 
-Rules:
-- Change ONLY what is necessary to fix the identified issue
-- Preserve all surrounding code exactly
-- Do not refactor, rename, or reorganize
-- Do not add features or improvements beyond the fix
-- If the fix requires changes to multiple locations, include all of them"""
+    Args:
+        project_dir: Absolute path to the project repository
+        base_branch: Branch or commit to compare against (default: "main")
+        focus: Review focus - "bugs", "security", "performance", or "all"
+        context: Additional context (ticket description, acceptance criteria)
+
+    Returns:
+        Codex output with: auto-fixed items, items needing human decision, awareness items
+    """
+    try:
+        output = run_review_and_fix(
+            project_dir=project_dir,
+            base_branch=base_branch,
+            focus=focus,
+            context=context,
+        )
+        return json.dumps({
+            "status": "complete",
+            "output": output,
+            "model": Config.MODEL,
+            "reasoning_effort": Config.REASONING,
+        }, indent=2)
+    except CodexRateLimitError as e:
+        return _error_response("rate_limit", str(e))
+    except CodexNotFoundError as e:
+        return _error_response("codex_not_found", str(e))
+    except CodexError as e:
+        return _error_response("codex_error", str(e))
 
 
 @server.tool()
 def codex_review(
-    diff: str,
-    context: str = "",
+    project_dir: str,
+    base_branch: str = "main",
     focus: str = "",
-    depth: str = "",
+    context: str = "",
 ) -> str:
-    """Review a code diff using OpenAI Codex to find bugs, security issues, and edge cases.
+    """Review-only pass — find and report issues without fixing anything.
+
+    Use this when you want to see all findings before any fixes are applied,
+    or when you want full control over what gets fixed.
+
+    Codex runs with read-only access. It reviews all changes, reads related
+    files for context, and produces prioritized findings (P0-P3).
 
     Args:
-        diff: Git diff content to review
-        context: Additional context (ticket description, acceptance criteria, etc.)
-        focus: Review focus area - "bugs", "security", "performance", or "all" (default: from config)
-        depth: Reasoning depth - "low", "medium", "high", "xhigh" (default: from config)
+        project_dir: Absolute path to the project repository
+        base_branch: Branch or commit to compare against (default: "main")
+        focus: Review focus - "bugs", "security", "performance", or "all"
+        context: Additional context (ticket description, acceptance criteria)
 
     Returns:
-        JSON string with structured findings
+        Prioritized findings with severity, evidence, and suggested fixes
     """
-    effective_focus = focus or Config.FOCUS
-    effective_depth = depth or Config.REASONING
-
-    # Override reasoning for this call if specified
-    original_reasoning = Config.REASONING
-    if depth:
-        Config.REASONING = depth
-
-    focus_instruction = ""
-    if effective_focus != "all":
-        focus_instruction = f"\nFocus specifically on {effective_focus} issues."
-
-    prompt = f"""{REVIEW_SYSTEM_PROMPT}
-{focus_instruction}
-
-## Context
-{context}
-
-## Code Diff to Review
-```diff
-{diff}
-```
-
-Return findings as a JSON array. Be thorough but precise — only report issues with concrete evidence."""
-
     try:
-        raw_output = run_codex(prompt, sandbox="read-only")
-        result = parse_review_output(raw_output)
-        return json.dumps(result, indent=2)
+        output = run_review_only(
+            project_dir=project_dir,
+            base_branch=base_branch,
+            focus=focus,
+            context=context,
+        )
+        return json.dumps({
+            "status": "complete",
+            "output": output,
+            "model": Config.MODEL,
+            "reasoning_effort": Config.REASONING,
+        }, indent=2)
     except CodexRateLimitError as e:
-        return json.dumps({
-            "error": "rate_limit",
-            "message": str(e),
-            "findings": [],
-        })
+        return _error_response("rate_limit", str(e))
     except CodexNotFoundError as e:
-        return json.dumps({
-            "error": "codex_not_found",
-            "message": str(e),
-            "findings": [],
-        })
+        return _error_response("codex_not_found", str(e))
     except CodexError as e:
-        return json.dumps({
-            "error": "codex_error",
-            "message": str(e),
-            "findings": [],
-        })
-    finally:
-        Config.REASONING = original_reasoning
+        return _error_response("codex_error", str(e))
 
 
 @server.tool()
 def codex_fix(
-    finding: str,
-    file_content: str,
+    project_dir: str,
+    findings: str,
     context: str = "",
 ) -> str:
-    """Generate a fix for a specific finding from codex_review.
+    """Fix specific approved findings (second pass after human review).
+
+    Use this after codex_review to fix findings the user has approved.
+    Codex runs with write access and makes targeted fixes.
 
     Args:
-        finding: JSON string of a single finding object from codex_review
-        file_content: Current content of the affected file
-        context: Additional context about the codebase
+        project_dir: Absolute path to the project repository
+        findings: The specific findings to fix (from codex_review output, filtered by user)
+        context: Additional guidance on approach, constraints, or preferences
 
     Returns:
-        JSON string with patch, explanation, and risk assessment
+        Description of changes made, files modified, and test results
     """
-    prompt = f"""{FIX_SYSTEM_PROMPT}
-
-## Finding to Fix
-```json
-{finding}
-```
-
-## Current File Content
-```
-{file_content}
-```
-
-## Additional Context
-{context}
-
-Generate the minimal fix. Return as JSON."""
-
     try:
-        raw_output = run_codex(prompt, sandbox="read-only")
-        result = parse_fix_output(raw_output)
-        return json.dumps(result, indent=2)
+        output = run_fix(
+            project_dir=project_dir,
+            findings=findings,
+            context=context,
+        )
+        return json.dumps({
+            "status": "complete",
+            "output": output,
+            "model": Config.MODEL,
+            "reasoning_effort": Config.REASONING,
+        }, indent=2)
     except CodexRateLimitError as e:
-        return json.dumps({
-            "error": "rate_limit",
-            "message": str(e),
-        })
+        return _error_response("rate_limit", str(e))
+    except CodexNotFoundError as e:
+        return _error_response("codex_not_found", str(e))
     except CodexError as e:
-        return json.dumps({
-            "error": "codex_error",
-            "message": str(e),
-        })
+        return _error_response("codex_error", str(e))
 
 
 if __name__ == "__main__":
