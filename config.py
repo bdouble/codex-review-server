@@ -1,71 +1,97 @@
 """Configuration for the Codex Review MCP Server.
 
-All settings loaded from environment variables with sensible defaults.
-A .env file in the server directory is loaded if present.
+All settings read live from environment variables on each access.
+A .env file in the server directory is re-loaded on each read,
+so changes take effect on the next tool call without restarting.
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from the same directory as this file
-load_dotenv(Path(__file__).parent / ".env")
+_ENV_FILE = Path(__file__).parent / ".env"
+
+# Severity ordering (static — no reason to make this configurable)
+SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+# Allowed file extensions for review (static)
+ALLOWED_EXTENSIONS = {
+    ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java",
+    ".rb", ".php", ".swift", ".kt", ".cs", ".c", ".cpp", ".h",
+    ".html", ".css", ".scss", ".less", ".json", ".yaml", ".yml",
+    ".toml", ".xml", ".sql", ".sh", ".bash", ".zsh", ".md",
+    ".txt", ".env.example", ".gitignore", ".dockerignore",
+    ".tf", ".tfvars", ".prisma", ".graphql", ".proto",
+}
+
+# Blocked paths (static)
+BLOCKED_PATHS = {
+    ".ssh", ".gnupg", ".aws", ".env", ".netrc", "credentials",
+    "secrets", ".git/config", ".claude/", ".codex/", ".config",
+    ".kube", ".docker/config",
+}
+
+
+class classproperty:
+    """Descriptor that works like @property but on the class itself."""
+    def __init__(self, func):
+        self.func = func
+    def __get__(self, obj, objtype=None):
+        return self.func(objtype)
+
+
+def _reload_env():
+    """Re-read .env file, overriding current env vars."""
+    load_dotenv(_ENV_FILE, override=True)
 
 
 class Config:
-    """Server configuration loaded from environment variables."""
+    """Server configuration. All properties read live from env vars."""
 
-    # Codex CLI home directory (where config.toml and auth credentials live)
-    # Default: ~/.codex — set this to use a different Codex account/subscription
-    CODEX_HOME: str = os.getenv("CODEX_REVIEW_HOME", os.path.expanduser("~/.codex"))
+    @staticmethod
+    def _get(key: str, default: str) -> str:
+        _reload_env()
+        return os.getenv(key, default)
 
-    # Model configuration (OpenAI models only)
-    MODEL: str = os.getenv("CODEX_REVIEW_MODEL", "gpt-5.3-codex")
-    REASONING: str = os.getenv("CODEX_REVIEW_REASONING", "xhigh")
+    @classproperty
+    def CODEX_HOME(cls) -> str:
+        return os.path.expanduser(cls._get("CODEX_REVIEW_HOME", "~/.codex"))
 
-    # Timeouts
-    TIMEOUT: int = int(os.getenv("CODEX_REVIEW_TIMEOUT", "300"))
+    @classproperty
+    def MODEL(cls) -> str:
+        return cls._get("CODEX_REVIEW_MODEL", "gpt-5.3-codex")
 
-    # Review behavior
-    MIN_SEVERITY: str = os.getenv("CODEX_REVIEW_MIN_SEVERITY", "medium")
-    FOCUS: str = os.getenv("CODEX_REVIEW_FOCUS", "all")
+    @classproperty
+    def REASONING(cls) -> str:
+        return cls._get("CODEX_REVIEW_REASONING", "xhigh")
 
-    # Fix behavior
-    AUTO_FIX: bool = os.getenv("CODEX_REVIEW_AUTO_FIX", "false").lower() == "true"
+    @classproperty
+    def TIMEOUT(cls) -> int:
+        return int(cls._get("CODEX_REVIEW_TIMEOUT", "300"))
 
-    # Severity ordering for filtering
-    SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    @classproperty
+    def MIN_SEVERITY(cls) -> str:
+        return cls._get("CODEX_REVIEW_MIN_SEVERITY", "medium")
 
-    # Allowed file extensions for review (text-based only)
-    ALLOWED_EXTENSIONS = {
-        ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java",
-        ".rb", ".php", ".swift", ".kt", ".cs", ".c", ".cpp", ".h",
-        ".html", ".css", ".scss", ".less", ".json", ".yaml", ".yml",
-        ".toml", ".xml", ".sql", ".sh", ".bash", ".zsh", ".md",
-        ".txt", ".env.example", ".gitignore", ".dockerignore",
-        ".tf", ".tfvars", ".prisma", ".graphql", ".proto",
-    }
+    @classproperty
+    def FOCUS(cls) -> str:
+        return cls._get("CODEX_REVIEW_FOCUS", "all")
 
-    # Blocked paths (never include in review context)
-    BLOCKED_PATHS = {
-        ".ssh", ".gnupg", ".aws", ".env", ".netrc", "credentials",
-        "secrets", ".git/config", ".claude/", ".codex/", ".config",
-        ".kube", ".docker/config",
-    }
+    @classproperty
+    def AUTO_FIX(cls) -> bool:
+        return cls._get("CODEX_REVIEW_AUTO_FIX", "false").lower() == "true"
 
     @classmethod
     def validate(cls) -> list[str]:
-        """Validate configuration. Returns list of warnings."""
+        """Validate current configuration. Returns list of warnings."""
         warnings = []
 
-        # Model must be an OpenAI model
         if not (cls.MODEL.startswith("gpt-") or cls.MODEL.startswith("o")):
             warnings.append(
                 f"CODEX_REVIEW_MODEL='{cls.MODEL}' does not look like an OpenAI model. "
                 f"Expected prefix 'gpt-' or 'o'."
             )
 
-        # Reasoning must be valid
         valid_reasoning = {"none", "low", "medium", "high", "xhigh"}
         if cls.REASONING not in valid_reasoning:
             warnings.append(
@@ -73,11 +99,10 @@ class Config:
                 f"Expected one of: {', '.join(sorted(valid_reasoning))}"
             )
 
-        # Severity must be valid
-        if cls.MIN_SEVERITY not in cls.SEVERITY_ORDER:
+        if cls.MIN_SEVERITY not in SEVERITY_ORDER:
             warnings.append(
                 f"CODEX_REVIEW_MIN_SEVERITY='{cls.MIN_SEVERITY}' is not valid. "
-                f"Expected one of: {', '.join(cls.SEVERITY_ORDER.keys())}"
+                f"Expected one of: {', '.join(SEVERITY_ORDER.keys())}"
             )
 
         return warnings

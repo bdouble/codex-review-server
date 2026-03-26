@@ -7,7 +7,7 @@ non-JSON responses.
 
 import json
 import re
-from config import Config
+from config import Config, SEVERITY_ORDER
 
 
 def parse_review_output(raw_output: str) -> dict:
@@ -31,14 +31,14 @@ def parse_review_output(raw_output: str) -> dict:
         findings = _fallback_text_parse(raw_output)
 
     # Filter by minimum severity
-    min_level = Config.SEVERITY_ORDER.get(Config.MIN_SEVERITY, 2)
+    min_level = SEVERITY_ORDER.get(Config.MIN_SEVERITY, 2)
     filtered = [
         f for f in findings
-        if Config.SEVERITY_ORDER.get(f.get("severity", "low"), 3) <= min_level
+        if SEVERITY_ORDER.get(f.get("severity", "low"), 3) <= min_level
     ]
 
     # Sort by severity (critical first)
-    filtered.sort(key=lambda f: Config.SEVERITY_ORDER.get(f.get("severity", "low"), 3))
+    filtered.sort(key=lambda f: SEVERITY_ORDER.get(f.get("severity", "low"), 3))
 
     summary_parts = []
     for sev in ["critical", "high", "medium", "low"]:
