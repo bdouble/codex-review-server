@@ -44,7 +44,7 @@ brew install python@3.14
 
 ```bash
 # macOS
-brew install codex-cli
+npm i -g @openai/codex
 
 # Verify
 codex --version
@@ -217,7 +217,7 @@ The server never sees or stores your ChatGPT credentials. Authentication is hand
 
 ```bash
 which codex        # check if installed
-brew install codex-cli  # install
+npm i -g @openai/codex  # install
 ```
 
 ### "Codex CLI authentication failed"
