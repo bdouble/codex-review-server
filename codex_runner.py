@@ -90,6 +90,11 @@ def run_codex(
                 "Codex rate limit reached. Wait a few minutes and retry, "
                 "or continue without cross-model review."
             )
+        if "401" in stderr or "auth" in stderr.lower() or "login" in stderr.lower() or "unauthorized" in stderr.lower():
+            raise CodexError(
+                "Codex CLI authentication failed. Your session may have expired.\n"
+                "Fix: run `codex login` to re-authenticate with your ChatGPT account."
+            )
         raise CodexError(f"Codex CLI failed (exit {result.returncode}): {stderr}")
 
     return _strip_codex_chrome(result.stdout)
