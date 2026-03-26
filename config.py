@@ -67,7 +67,7 @@ class Config:
 
     @classproperty
     def TIMEOUT(cls) -> int:
-        return int(cls._get("CODEX_REVIEW_TIMEOUT", "300"))
+        return int(cls._get("CODEX_REVIEW_TIMEOUT", "1500"))
 
     @classproperty
     def MIN_SEVERITY(cls) -> str:
