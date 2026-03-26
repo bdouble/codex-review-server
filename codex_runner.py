@@ -4,6 +4,7 @@ Handles spawning codex exec processes, timeout enforcement, and output capture.
 Uses ChatGPT subscription auth (via `codex login`), not API keys.
 """
 
+import os
 import subprocess
 import shutil
 import json
@@ -69,6 +70,10 @@ def run_codex(
         prompt,
     ]
 
+    # Set CODEX_HOME to point Codex CLI at the configured credentials directory
+    env = os.environ.copy()
+    env["CODEX_HOME"] = Config.CODEX_HOME
+
     try:
         result = subprocess.run(
             cmd,
@@ -76,6 +81,7 @@ def run_codex(
             text=True,
             timeout=timeout,
             cwd="/tmp",  # Run in /tmp to avoid repo interference
+            env=env,
         )
     except subprocess.TimeoutExpired:
         raise CodexError(

@@ -9,6 +9,10 @@ import os
 class Config:
     """Server configuration loaded from environment variables."""
 
+    # Codex CLI home directory (where config.toml and auth credentials live)
+    # Default: ~/.codex — set this to use a different Codex account/subscription
+    CODEX_HOME: str = os.getenv("CODEX_REVIEW_HOME", os.path.expanduser("~/.codex"))
+
     # Model configuration (OpenAI models only)
     MODEL: str = os.getenv("CODEX_REVIEW_MODEL", "gpt-5.3-codex")
     REASONING: str = os.getenv("CODEX_REVIEW_REASONING", "xhigh")

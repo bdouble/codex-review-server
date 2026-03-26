@@ -37,6 +37,7 @@ All settings via environment variables (set in shell or `.claude/settings.json`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CODEX_REVIEW_HOME` | `~/.codex` | Codex CLI home directory (config.toml + credentials) |
 | `CODEX_REVIEW_MODEL` | `gpt-5.3-codex` | OpenAI model ID (must start with `gpt-` or `o`) |
 | `CODEX_REVIEW_REASONING` | `xhigh` | Reasoning effort: none, low, medium, high, xhigh |
 | `CODEX_REVIEW_TIMEOUT` | `300` | Timeout in seconds per call |
