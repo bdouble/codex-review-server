@@ -11,26 +11,6 @@ from dotenv import load_dotenv
 
 _ENV_FILE = Path(__file__).parent / ".env"
 
-# Severity ordering (static — no reason to make this configurable)
-SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-
-# Allowed file extensions for review (static)
-ALLOWED_EXTENSIONS = {
-    ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java",
-    ".rb", ".php", ".swift", ".kt", ".cs", ".c", ".cpp", ".h",
-    ".html", ".css", ".scss", ".less", ".json", ".yaml", ".yml",
-    ".toml", ".xml", ".sql", ".sh", ".bash", ".zsh", ".md",
-    ".txt", ".env.example", ".gitignore", ".dockerignore",
-    ".tf", ".tfvars", ".prisma", ".graphql", ".proto",
-}
-
-# Blocked paths (static)
-BLOCKED_PATHS = {
-    ".ssh", ".gnupg", ".aws", ".env", ".netrc", "credentials",
-    "secrets", ".git/config", ".claude/", ".codex/", ".config",
-    ".kube", ".docker/config",
-}
-
 
 class classproperty:
     """Descriptor that works like @property but on the class itself."""
@@ -70,16 +50,8 @@ class Config:
         return int(cls._get("CODEX_REVIEW_TIMEOUT", "1500"))
 
     @classproperty
-    def MIN_SEVERITY(cls) -> str:
-        return cls._get("CODEX_REVIEW_MIN_SEVERITY", "medium")
-
-    @classproperty
     def FOCUS(cls) -> str:
         return cls._get("CODEX_REVIEW_FOCUS", "all")
-
-    @classproperty
-    def AUTO_FIX(cls) -> bool:
-        return cls._get("CODEX_REVIEW_AUTO_FIX", "false").lower() == "true"
 
     @classmethod
     def validate(cls) -> list[str]:
@@ -97,12 +69,6 @@ class Config:
             warnings.append(
                 f"CODEX_REVIEW_REASONING='{cls.REASONING}' is not valid. "
                 f"Expected one of: {', '.join(sorted(valid_reasoning))}"
-            )
-
-        if cls.MIN_SEVERITY not in SEVERITY_ORDER:
-            warnings.append(
-                f"CODEX_REVIEW_MIN_SEVERITY='{cls.MIN_SEVERITY}' is not valid. "
-                f"Expected one of: {', '.join(SEVERITY_ORDER.keys())}"
             )
 
         return warnings

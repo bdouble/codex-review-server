@@ -1,41 +1,52 @@
 # Codex Review MCP Server
 
-An MCP server that gives Claude Code access to OpenAI's Codex models for cross-model code review. Uses Codex CLI with ChatGPT subscription authentication — no API key billing required.
+An MCP server that gives Claude Code access to OpenAI's Codex models for cross-model code review. Codex runs as a full agent in your repository — reading files, exploring dependencies, and understanding context — the same as running it manually in the Codex UI.
+
+Uses Codex CLI with ChatGPT subscription authentication. No API key billing required.
 
 ## What It Does
 
-- **`codex_review`** — Sends a code diff to GPT-5.3-Codex (or configured model) for adversarial bug detection, security analysis, and edge case identification
-- **`codex_fix`** — Generates minimal, surgical fixes for specific findings
+Three tools, matching a natural review workflow:
+
+| Tool | Mode | What Happens |
+|------|------|-------------|
+| `codex_review_and_fix` | Review + auto-fix | Codex reviews changes, auto-fixes clear P0-P2 issues, reports ambiguous ones with questions, lists P3 for awareness |
+| `codex_review` | Review only | Same review, no fixes. Read-only. For when you want findings first. |
+| `codex_fix` | Fix only | Applies specific approved findings. Second pass after human review. |
+
+### Priority Scheme
+
+- **P0 (Critical)**: Security vulnerabilities, data loss, crashes, auth bypass
+- **P1 (High)**: Significant bugs, logic errors, race conditions, missing error handling
+- **P2 (Medium)**: Edge cases, potential issues under specific conditions
+- **P3 (Low)**: Minor improvements, suggestions (never auto-fixed)
+
+### Auto-Fix Rules
+
+For P0-P2 findings:
+- **Clear-cut** (confident, obvious fix) → auto-fixed
+- **Has questions** (ambiguity, trade-offs, needs context) → reported with Codex's question, NOT fixed
+
+P3 findings are always reported only, never fixed.
 
 ## Prerequisites
 
-Before installing the MCP server, you need:
-
 ### 1. Python 3.10 or later
 
-Check your version:
 ```bash
-python3 --version
-```
+python3 --version  # must be 3.10+
 
-If you need to install or upgrade:
-```bash
 # macOS
 brew install python@3.14
-
-# Ubuntu/Debian
-sudo apt install python3.12
 ```
 
 ### 2. Codex CLI
-
-Codex CLI is OpenAI's terminal-based coding agent. This MCP server uses it as a bridge to access GPT models.
 
 ```bash
 # macOS
 brew install codex-cli
 
-# Verify installation
+# Verify
 codex --version
 ```
 
@@ -43,14 +54,13 @@ See [github.com/openai/codex](https://github.com/openai/codex) for other platfor
 
 ### 3. ChatGPT Subscription
 
-Codex CLI authenticates through your ChatGPT account. You need an active ChatGPT Plus ($20/month) or Pro ($200/month) subscription. No separate API key or billing is required.
+Codex CLI authenticates through your ChatGPT account (Plus at $20/month or Pro at $200/month). No separate API key needed.
 
-Authenticate Codex CLI (opens your browser):
 ```bash
-codex login
+codex login  # opens browser, sign into ChatGPT
 ```
 
-This stores credentials in `~/.codex/config.toml`. You only need to do this once — sessions persist until they expire, at which point you run `codex login` again.
+Credentials are stored in `~/.codex/config.toml`. Re-run `codex login` if your session expires.
 
 ### 4. Claude Code
 
@@ -58,15 +68,13 @@ Install from [claude.ai/code](https://claude.ai/code) if you haven't already.
 
 ## Installation
 
-### Step 1: Clone the repository
+### Step 1: Clone
 
 ```bash
 git clone https://github.com/bdouble/codex-review-server.git ~/.claude/mcp/codex-review-server
 ```
 
-### Step 2: Create a virtual environment and install dependencies
-
-The MCP SDK requires its own virtual environment:
+### Step 2: Set up virtual environment
 
 ```bash
 cd ~/.claude/mcp/codex-review-server
@@ -78,40 +86,42 @@ deactivate
 
 ### Step 3: Register with Claude Code
 
-Register the server using the venv's Python (so it can find the `mcp` package):
-
 ```bash
-claude mcp add codex-review-server -- ~/.claude/mcp/codex-review-server/.venv/bin/python3 ~/.claude/mcp/codex-review-server/server.py
+# Global (available in all projects — recommended)
+claude mcp add --scope user codex-review-server -- \
+  ~/.claude/mcp/codex-review-server/.venv/bin/python3 \
+  ~/.claude/mcp/codex-review-server/server.py
+
+# Or project-scoped (current repo only)
+claude mcp add codex-review-server -- \
+  ~/.claude/mcp/codex-review-server/.venv/bin/python3 \
+  ~/.claude/mcp/codex-review-server/server.py
 ```
 
 ### Step 4: Verify
 
-Start a new Claude Code session and ask:
+Start a **new** Claude Code session (MCP servers load at session start) and ask:
 
 ```
 What MCP tools are available from codex-review-server?
 ```
 
-Claude should list `codex_review` and `codex_fix`.
-
-For a full smoke test, in any repo with changes on a branch:
-
-```
-Use codex_review to review the output of `git diff main...HEAD`
-```
+Claude should list `codex_review_and_fix`, `codex_review`, and `codex_fix`.
 
 ## Configuration
 
 All settings are optional. Defaults work out of the box.
 
-Copy the example env file if you want to customize:
 ```bash
 cd ~/.claude/mcp/codex-review-server
 cp .env.example .env
 # Edit .env as needed
 ```
 
-Or set variables in your `.claude/settings.json`:
+Config is **live-reloaded** on every tool call. Edit `.env` mid-session and the next call uses the new values — no restart needed.
+
+You can also set values in `.claude/settings.json` (env vars override `.env`):
+
 ```json
 {
   "env": {
@@ -128,41 +138,50 @@ Or set variables in your `.claude/settings.json`:
 | `CODEX_REVIEW_HOME` | `~/.codex` | Codex CLI home directory (config.toml + credentials) |
 | `CODEX_REVIEW_MODEL` | `gpt-5.3-codex` | OpenAI model ID (must start with `gpt-` or `o`) |
 | `CODEX_REVIEW_REASONING` | `xhigh` | Reasoning effort: `none`, `low`, `medium`, `high`, `xhigh` |
-| `CODEX_REVIEW_TIMEOUT` | `1500` | Timeout in seconds per call (25 min default — repo-aware reviews are thorough) |
-| `CODEX_REVIEW_AUTO_FIX` | `false` | Auto-approve all findings without user interaction |
-| `CODEX_REVIEW_MIN_SEVERITY` | `medium` | Minimum severity to report: `critical`, `high`, `medium`, `low` |
+| `CODEX_REVIEW_TIMEOUT` | `1500` | Timeout in seconds (25 min default — repo-aware reviews are thorough) |
 | `CODEX_REVIEW_FOCUS` | `all` | Review focus: `bugs`, `security`, `performance`, `all` |
 
 ### Reasoning Effort Levels
 
-The `CODEX_REVIEW_REASONING` setting controls how deeply Codex analyzes the code:
+| Level | Use When |
+|-------|----------|
+| `none` | Quick syntax checks |
+| `low` | Simple, obvious issues |
+| `medium` | General code review |
+| `high` | Complex logic, security |
+| `xhigh` | Deep analysis, finding subtle bugs (default) |
 
-| Level | Speed | Cost | Use When |
-|-------|-------|------|----------|
-| `none` | Fastest | Lowest | Quick syntax checks |
-| `low` | Fast | Low | Simple, obvious issues |
-| `medium` | Moderate | Moderate | General code review |
-| `high` | Slow | High | Complex logic, security |
-| `xhigh` | Slowest | Highest | Deep analysis, finding subtle bugs (default) |
+"Cost" is ChatGPT rate limit consumption, not billing. All usage is covered by your subscription.
 
-Note: "cost" here refers to ChatGPT rate limit consumption, not billing. All usage is covered by your ChatGPT subscription.
+### Multiple Codex Accounts
+
+If you maintain multiple ChatGPT subscriptions, set `CODEX_REVIEW_HOME` to point at a different credentials directory:
+
+```bash
+# In .env
+CODEX_REVIEW_HOME=/path/to/other/.codex
+```
+
+Each directory should have its own `config.toml` from running `CODEX_HOME=/path/to/other/.codex codex login`.
 
 ## Usage
 
 ### Direct tool calls
 
-Once installed, Claude Code can call the tools directly in any conversation:
+In any Claude Code session:
 
 ```
-Use codex_review to review this diff for bugs and security issues
+Use codex_review_and_fix to review and fix the changes on this branch
 ```
+
+Claude calls the MCP tool with the project directory and base branch. Codex runs as a full agent — reads files, runs git commands, explores the codebase.
 
 ### With pm-vibecode-ops workflow
 
-If you use the [pm-vibecode-ops](https://github.com/bdouble/pm-vibecode-ops) workflow plugin:
+If you use the [pm-vibecode-ops](https://github.com/bdouble/pm-vibecode-ops) workflow:
 
 - **`/codex-review [ticket-id]`** — Standalone cross-model review with Linear integration
-- **`/execute-ticket [ticket-id]`** — Automatically includes Codex review as Phase 5.5 (between Code Review and Security Review)
+- **`/execute-ticket [ticket-id]`** — Includes Codex review as Phase 5.5 (between Code Review and Security Review)
 - **`/epic-swarm [epic-id]`** — Includes Codex review in each parallel ticket's workflow
 
 ### Without this MCP server
@@ -176,87 +195,84 @@ Claude Code
     │ (MCP tool call over stdio)
     ▼
 server.py (FastMCP)
-    │ (subprocess with CODEX_HOME env)
+    │
     ▼
-codex exec --model gpt-5.3-codex --reasoning-effort xhigh --sandbox read-only
-    │ (authenticates via ~/.codex/config.toml — ChatGPT subscription)
+codex exec --model gpt-5.3-codex -c reasoning.effort=xhigh --sandbox read-only
+    │ (runs IN the project directory with full file access)
+    │ (authenticates via CODEX_HOME/config.toml — ChatGPT subscription)
     ▼
-GPT-5.3-Codex response
-    │ (parsed into structured JSON findings)
+Codex agent explores repo, reviews changes, applies fixes
+    │
     ▼
-Claude Code receives findings
+Output captured via -o flag, returned to Claude Code
 ```
 
-The server never sees or stores your ChatGPT credentials. Authentication is handled entirely by Codex CLI reading its own config directory.
+Codex runs in your actual repository, not against a diff blob. It can read any file, run git commands, trace code paths, and explore dependencies — identical to using the Codex UI manually.
+
+The server never sees or stores your ChatGPT credentials. Authentication is handled entirely by Codex CLI.
 
 ## Troubleshooting
 
 ### "Codex CLI not found"
 
-Codex CLI is not installed or not on your PATH.
-
 ```bash
-# Check if installed
-which codex
-
-# Install
-brew install codex-cli
+which codex        # check if installed
+brew install codex-cli  # install
 ```
 
 ### "Codex CLI authentication failed"
 
-Your Codex CLI session has expired.
-
 ```bash
-codex login
+codex login  # re-authenticate
 ```
 
 ### "Rate limit reached"
 
-You've hit your ChatGPT subscription's rate limit (30-150 messages per 5-hour window on Plus, 300-1500 on Pro). The server returns a `rate_limit` error and the workflow continues without the Codex review. Wait a few minutes and retry, or run `/codex-review` independently later.
+You've hit your subscription's rate limit (30-150 messages/5hr on Plus, 300-1500 on Pro). The workflow continues without the Codex review. Wait a few minutes and retry, or run `/codex-review` independently later.
+
+To switch to a different subscription mid-session, edit `.env`:
+```bash
+CODEX_REVIEW_HOME=/path/to/other/.codex
+```
+The next tool call will use the new credentials (live reload).
 
 ### MCP server not appearing in Claude Code
 
-1. Verify registration:
-   ```bash
-   claude mcp list
-   ```
+```bash
+# Check registration
+claude mcp list
 
-2. Check the Python path points to the venv:
-   ```bash
-   # Should show the .venv path, not system Python
-   claude mcp list | grep codex-review-server
-   ```
+# Re-register
+claude mcp remove codex-review-server
+claude mcp add --scope user codex-review-server -- \
+  ~/.claude/mcp/codex-review-server/.venv/bin/python3 \
+  ~/.claude/mcp/codex-review-server/server.py
+```
 
-3. Re-register if needed:
-   ```bash
-   claude mcp remove codex-review-server
-   claude mcp add codex-review-server -- ~/.claude/mcp/codex-review-server/.venv/bin/python3 ~/.claude/mcp/codex-review-server/server.py
-   ```
+Start a **new** session — MCP servers load at session start.
 
 ### "No matching distribution found for mcp"
 
-Your Python version is too old (needs 3.10+), or you're not using the virtual environment.
+Python too old or not using the virtual environment:
 
 ```bash
-# Check Python version inside venv
-~/.claude/mcp/codex-review-server/.venv/bin/python3 --version
-
-# If too old, recreate with a newer Python
-cd ~/.claude/mcp/codex-review-server
-rm -rf .venv
-python3.14 -m venv .venv  # or python3.12, python3.13
-source .venv/bin/activate
-pip install -r requirements.txt
+~/.claude/mcp/codex-review-server/.venv/bin/python3 --version  # needs 3.10+
 ```
 
-### Server starts but tools don't work
+### Review times out
 
-Test the components independently:
+Repo-aware reviews with `xhigh` reasoning on large diffs can take 10-20 minutes. Increase the timeout:
 
 ```bash
-# 1. Test Codex CLI directly
-codex exec "Reply with just the word hello" --sandbox read-only --skip-git-repo-check --color never
+# In .env
+CODEX_REVIEW_TIMEOUT=2400  # 40 minutes
+```
+
+### Test components independently
+
+```bash
+# 1. Test Codex CLI
+codex exec "Reply with just hello" --sandbox read-only --skip-git-repo-check --color never
 
 # 2. Test server imports
 ~/.claude/mcp/codex-review-server/.venv/bin/python3 -c "
