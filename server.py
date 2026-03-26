@@ -22,7 +22,7 @@ import json
 # Add server directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 from config import Config
 from codex_runner import run_codex, CodexRateLimitError, CodexNotFoundError, CodexError
 from output_parser import parse_review_output, parse_fix_output
