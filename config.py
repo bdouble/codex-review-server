@@ -1,9 +1,15 @@
 """Configuration for the Codex Review MCP Server.
 
 All settings loaded from environment variables with sensible defaults.
+A .env file in the server directory is loaded if present.
 """
 
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from the same directory as this file
+load_dotenv(Path(__file__).parent / ".env")
 
 
 class Config:
