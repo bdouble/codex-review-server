@@ -9,6 +9,7 @@ capabilities as running it manually.
 """
 
 import os
+import re
 import subprocess
 import shutil
 from config import Config
@@ -53,16 +54,36 @@ def _check_errors(result: subprocess.CompletedProcess) -> None:
         return
 
     stderr = result.stderr.strip()
-    if "rate limit" in stderr.lower() or "429" in stderr:
+    stderr_lower = stderr.lower()
+
+    # Rate limit: match "429" only as an HTTP status code, not as a substring
+    # of token counts, session IDs, etc.
+    is_rate_limit = (
+        "rate limit" in stderr_lower
+        or "rate_limit" in stderr_lower
+        or re.search(r'\b429\b', stderr) is not None
+    )
+    if is_rate_limit:
         raise CodexRateLimitError(
             "Codex rate limit reached. Wait a few minutes and retry, "
             "or continue without cross-model review."
         )
-    if "401" in stderr or "auth" in stderr.lower() or "login" in stderr.lower() or "unauthorized" in stderr.lower():
+
+    # Auth errors: require "401" as a word boundary and tighten keyword matches
+    is_auth_error = (
+        re.search(r'\b401\b', stderr) is not None
+        or "unauthorized" in stderr_lower
+        or "authentication failed" in stderr_lower
+        or "please login" in stderr_lower
+        or "please log in" in stderr_lower
+        or "codex login" in stderr_lower
+    )
+    if is_auth_error:
         raise CodexError(
             "Codex CLI authentication failed. Your session may have expired.\n"
             "Fix: run `codex login` to re-authenticate with your ChatGPT account."
         )
+
     raise CodexError(f"Codex CLI failed (exit {result.returncode}): {stderr}")
 
 
