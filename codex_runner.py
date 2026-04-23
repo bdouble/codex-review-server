@@ -56,12 +56,12 @@ def _check_errors(result: subprocess.CompletedProcess) -> None:
     stderr = result.stderr.strip()
     stderr_lower = stderr.lower()
 
-    # Rate limit: match "429" only as an HTTP status code, not as a substring
-    # of token counts, session IDs, etc.
+    # Rate limit: match "429" only in HTTP-status context, not as a substring
+    # of token counts, session IDs, line numbers, etc.
     is_rate_limit = (
         "rate limit" in stderr_lower
         or "rate_limit" in stderr_lower
-        or re.search(r'\b429\b', stderr) is not None
+        or re.search(r'(?:http|status|code)\s+429\b|429\s+too\s+many\s+requests', stderr_lower) is not None
     )
     if is_rate_limit:
         raise CodexRateLimitError(
@@ -69,9 +69,10 @@ def _check_errors(result: subprocess.CompletedProcess) -> None:
             "or continue without cross-model review."
         )
 
-    # Auth errors: require "401" as a word boundary and tighten keyword matches
+    # Auth errors: match "401" only in HTTP-status context, not as a substring
+    # of token counts, session IDs, line numbers, etc.
     is_auth_error = (
-        re.search(r'\b401\b', stderr) is not None
+        re.search(r'(?:http|status|code)\s+401\b|401\s+unauthorized', stderr_lower) is not None
         or "unauthorized" in stderr_lower
         or "authentication failed" in stderr_lower
         or "please login" in stderr_lower
