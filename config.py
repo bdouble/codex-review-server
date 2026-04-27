@@ -47,7 +47,7 @@ class Config:
 
     @classproperty
     def TIMEOUT(cls) -> int:
-        return int(cls._get("CODEX_REVIEW_TIMEOUT", "1500"))
+        return int(cls._get("CODEX_REVIEW_TIMEOUT", "4500"))
 
     @classproperty
     def FOCUS(cls) -> str:

@@ -113,7 +113,7 @@ def _run_codex(
     cmd = [
         codex_bin, "exec",
         "--model", Config.MODEL,
-        "-c", f"reasoning.effort={Config.REASONING}",
+        "-c", f"model_reasoning_effort={Config.REASONING}",
         "--sandbox", sandbox,
         "--color", "never",
     ]
@@ -131,6 +131,7 @@ def _run_codex(
             timeout=timeout,
             cwd=project_dir,
             env=_build_env(),
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         # Check if output file has partial results
