@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "codex-delegate": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run-server.sh",
-      "args": []
-    }
-  }
-}

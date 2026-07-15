@@ -92,7 +92,15 @@ branch through the server itself, then reproducing each one:
   respected its sandbox, and whether your `verify_command` actually passed.
 - **Structured output.** Pass `result_schema` and Codex's final message is a
   validated JSON object, returned as `structured_output`.
-- **Claude Code plugin packaging** — `.claude-plugin/`, seven slash commands
+- **Claude Code plugin packaging** — MCP server declared inline in
+  `plugin.json` rather than a root `.mcp.json`. A `.mcp.json` at a repo root is
+  Claude Code's *project-scope* convention, and this plugin's root is a repo
+  people open — so Claude Code loaded it as a project server, where
+  `${CLAUDE_PLUGIN_ROOT}` does not expand, and the server died with `ENOENT`
+  for anyone who opened the repo. Verified by installing the plugin for real:
+  the server registers, connects, and answers tool calls.
+
+  Also ships `.claude-plugin/`, seven slash commands
   (`/codex:delegate`, `/codex:review`, `/codex:status`, `/codex:result`,
   `/codex:follow-up`, `/codex:cancel`, `/codex:models`), and a `codex-delegation`
   skill covering model choice, verification discipline, and fan-out. The

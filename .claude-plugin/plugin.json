@@ -10,6 +10,12 @@
   "homepage": "https://github.com/bdouble/codex-review-server",
   "repository": "https://github.com/bdouble/codex-review-server",
   "license": "MIT",
+  "mcpServers": {
+    "codex-delegate": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run-server.sh",
+      "args": []
+    }
+  },
   "keywords": [
     "codex",
     "openai",

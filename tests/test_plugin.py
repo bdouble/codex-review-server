@@ -34,9 +34,12 @@ def _tool_names() -> set[str]:
     return set(re.findall(r"@server\.tool\(\)\ndef (\w+)", source))
 
 
+def _plugin_manifest() -> dict:
+    return json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+
+
 def _mcp_server_name() -> str:
-    config = json.loads((ROOT / ".mcp.json").read_text())
-    names = list(config["mcpServers"])
+    names = list(_plugin_manifest()["mcpServers"])
     assert len(names) == 1
     return names[0]
 
@@ -72,9 +75,21 @@ class TestManifests:
         if plugin.get("license"):
             assert (ROOT / "LICENSE").exists()
 
-    def test_mcp_json_points_at_an_executable_launcher(self):
-        config = json.loads((ROOT / ".mcp.json").read_text())
-        command = config["mcpServers"][_mcp_server_name()]["command"]
+    def test_no_root_mcp_json(self):
+        # A .mcp.json at the repo root is Claude Code's *project-scope* config
+        # convention. Since this plugin's root is also a repo people open,
+        # Claude Code would load it as a project server — a context where
+        # ${CLAUDE_PLUGIN_ROOT} is undefined, so the command resolves to a
+        # literal path and the server dies with ENOENT for everyone who opens
+        # the repo. The server config belongs inline in plugin.json instead.
+        assert not (ROOT / ".mcp.json").exists(), (
+            "Root .mcp.json is loaded as project config, where "
+            "${CLAUDE_PLUGIN_ROOT} does not expand. Keep mcpServers inline in "
+            ".claude-plugin/plugin.json."
+        )
+
+    def test_mcp_server_points_at_an_executable_launcher(self):
+        command = _plugin_manifest()["mcpServers"][_mcp_server_name()]["command"]
         assert command.startswith("${CLAUDE_PLUGIN_ROOT}/")
         relative = command.replace("${CLAUDE_PLUGIN_ROOT}/", "")
         launcher = ROOT / relative
