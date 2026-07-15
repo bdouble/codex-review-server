@@ -138,12 +138,21 @@ codex login              # opens browser; credentials land in ~/.codex
 
 ```bash
 claude plugin marketplace add bdouble/codex-review-server
-claude plugin install codex-delegate
+claude plugin install codex-delegate@codex-delegate
 ```
 
-This registers the MCP server, the slash commands, and the `codex-delegation`
-skill. The launcher creates its own virtualenv and installs dependencies on
-first run — no manual setup.
+The repo is its own single-plugin marketplace, so the name repeats — the first
+`codex-delegate` is the plugin, the second is the marketplace.
+
+This registers the MCP server, the seven slash commands, and the
+`codex-delegation` skill. The launcher creates its own virtualenv and installs
+dependencies on first run — no manual setup.
+
+Verify with `claude mcp list`, which should show:
+
+```
+plugin:codex-delegate:codex-delegate: .../scripts/run-server.sh - ✔ Connected
+```
 
 ### As a plain MCP server
 
@@ -159,6 +168,75 @@ claude mcp add --scope user codex-delegate -- \
 
 Start a **new** session — MCP servers load at session start — and ask
 *"what codex tools are available?"* to confirm.
+
+### Install gotchas
+
+- **You must start a new session.** MCP servers load at session start, so the
+  tools will not appear in the session where you installed them.
+- **The first run is slow.** The plugin launcher creates a virtualenv and pip
+  installs into it, which takes a few seconds. It logs progress to stderr; if
+  it were to write to stdout it would corrupt the MCP protocol stream.
+- **Python 3.10+ is required**, and `python3` must be on `PATH`. To pin a
+  specific interpreter, set `CODEX_MCP_PYTHON` — but then dependencies must
+  already be installed there (`$CODEX_MCP_PYTHON -m pip install -r
+  requirements.txt`); the launcher will not bootstrap an interpreter you chose
+  explicitly.
+- **Don't add a `.mcp.json` to this repo.** A `.mcp.json` at a repo root is
+  Claude Code's *project-scope* convention, and this plugin's root is a repo you
+  may open. Claude Code would load it as a project server — a context where
+  `${CLAUDE_PLUGIN_ROOT}` does not expand — and every session in the repo would
+  fail with `ENOENT`. The server is declared inline in `plugin.json` for exactly
+  this reason, and a test enforces it.
+- **`verify_command` runs against your project's Python, not this server's.**
+  The server's virtualenv is stripped from child processes, so `pytest` resolves
+  in the target project. If your project needs its venv active, say so in the
+  command: `--verify ".venv/bin/pytest -q"`.
+
+## Upgrading from 1.x
+
+1.x was review-only and blocking. Two things will break if you skip this.
+
+### 1. Remove the old registration
+
+The 1.x install registered a server named `codex-review-server`. Leave it in
+place and you'll have **two copies of every tool** with different names, both
+running the same code:
+
+```bash
+claude mcp remove codex-review-server
+```
+
+Then install the plugin (above), and start a new session. Confirm with
+`claude mcp list` — you want `plugin:codex-delegate:codex-delegate` and no
+`codex-review-server`.
+
+### 2. Tools return a job id, not output
+
+This is the breaking change. Every tool now starts a background job:
+
+```python
+# 1.x — blocked until Codex finished, returned the findings
+codex_review(project_dir="/repo")
+  -> {"status": "complete", "output": "## Findings\nP1: ..."}
+
+# 2.0 — returns immediately
+codex_review(project_dir="/repo")
+  -> {"status": "started", "job_id": "review-abc123-9f2e1c"}
+codex_status("review-abc123-9f2e1c", wait=True)   # blocks until done
+codex_result("review-abc123-9f2e1c")              # findings + verification
+```
+
+If you want the old blocking feel, `codex_status(job_id, wait=True)` is the
+single call that gives it. The upside is that a 20-minute run no longer occupies
+your session, and you can run several jobs at once.
+
+### 3. Environment variables were renamed (non-breaking)
+
+`CODEX_REVIEW_*` → `CODEX_*`. The old names are still honoured as a fallback, so
+an existing `.env` keeps working — but new installs should use the names in
+[Configuration](#configuration). One exception worth acting on: if your `.env`
+pins `CODEX_REVIEW_MODEL=gpt-5.3-codex`, that model is **dead** and every call
+will fail with HTTP 400. Change it, or delete the line to take the new default.
 
 ## Configuration
 
@@ -187,17 +265,11 @@ mid-session.
 
 ## Usage
 
-Delegate anything:
+In practice you just ask, and Claude drives the tools:
 
 ```
 Delegate to Codex: find every caller of authenticate() that ignores its return
 value, and report which are exploitable.
-```
-
-Fan out in parallel — each call returns a job id immediately:
-
-```
-Have Codex audit these three services for injection bugs, one job each.
 ```
 
 Let it edit, and prove it worked:
@@ -206,20 +278,74 @@ Let it edit, and prove it worked:
 /codex:delegate --write --verify "pytest -q" Fix the race in the session cache
 ```
 
-Cross-model review:
+Cross-model review, then continue in the same thread:
 
 ```
 /codex:review main --fix
+/codex:follow-up review-abc123 Now add regression tests for the case you found
 ```
 
-Continue without losing context:
+### The job lifecycle
+
+Every tool starts a background job and hands back an id. The full loop:
+
+```python
+codex_delegate(task="...", project_dir="/repo", write=True,
+               verify_command="pytest -q")
+  -> {"job_id": "delegate-abc123-9f2e1c", "sandbox": "workspace-write"}
+
+codex_status("delegate-abc123")          # prefix is enough
+  -> {"status": "running", "phase": "editing", "elapsed_seconds": 41.2}
+
+codex_status("delegate-abc123", wait=True)   # or just block
+  -> {"status": "completed", "phase": "done"}
+
+codex_result("delegate-abc123")
+  -> {"output": "## Summary\n...",
+      "verification": {"verified": true, ...},
+      "usage": {"output_tokens": 4200}}
+```
+
+`phase` tracks what Codex is doing right now — `investigating`, `editing`,
+`verifying` — so a long run is legible rather than a black box. `codex_cancel`
+stops a job and its Codex process. Omit the id from `codex_status` to list
+every job.
+
+### Running jobs in parallel
+
+Jobs are independent, so fan-out is just launching several:
 
 ```
-/codex:follow-up task-abc123 Now add regression tests for the case you found
+Have Codex audit each of these three repos for injection bugs, one job each.
 ```
 
-Structured data instead of prose — pass `result_schema` and Codex's final
-message is a validated JSON object returned as `structured_output`.
+**Across different repos.** Within one working tree the server enforces one
+writer at a time (readers may share) — a second conflicting job is rejected with
+`repo_busy` naming the blocker. That's not a limitation so much as an admission:
+Codex edits a real working tree, and two writers in one tree corrupt each other.
+
+### Structured output
+
+Pass `result_schema` and Codex's final message is a JSON object validated
+against it, returned as `structured_output` — better than parsing prose:
+
+```python
+codex_delegate(
+    task="Analyze each public function's error handling.",
+    project_dir="/repo",
+    result_schema={
+        "type": "object",
+        "properties": {
+            "functions": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "has_error_handling": {"type": "boolean"}}}},
+            "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+        },
+        "required": ["functions", "risk_level"],
+    },
+)
+# -> structured_output: {"functions": [...], "risk_level": "low"}
+```
 
 ## How it works
 
@@ -261,12 +387,13 @@ Notes on the implementation, since they're the non-obvious parts:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python3 -m pytest tests/ -q      # 148 tests, no Codex calls needed
+.venv/bin/python3 -m pytest tests/ -q      # 233 tests, no Codex calls needed
 ```
 
 The suite stubs the CLI, so it's fast and offline. It covers command
-construction (including the exec/resume flag divergence), porcelain parsing,
-job-store reconciliation, error classification, and every tool's validation path.
+construction (including the exec/resume flag divergence), git porcelain parsing,
+job-store reconciliation, worker identity, the repo lock, error classification,
+plugin manifests, and every tool's validation path.
 
 ## Troubleshooting
 
@@ -288,7 +415,26 @@ salvaged; treat it as incomplete. Narrow the task, lower the effort, or raise
 **Job stuck `running`** — check `phase` via `codex_status`. `max`/`ultra` runs
 are genuinely long. `codex_cancel` if wedged.
 
+**`repo_busy`** — another job holds that working tree. Wait
+(`codex_status(id, wait=True)`), cancel the blocker, or use a different repo.
+Not a bug: two jobs writing one tree corrupt each other.
+
 **Server not appearing** — `claude mcp list`, then start a *new* session.
+
+**`Failed to reconnect: ENOENT` + `Missing environment variables:
+CLAUDE_PLUGIN_ROOT`** — something is loading this plugin's server as a
+*project* server, where that variable doesn't expand. Check for a `.mcp.json` in
+the repo root (there shouldn't be one — see [Install
+gotchas](#install-gotchas)), and for a stale `enabledMcpjsonServers` entry in
+`.claude/settings.local.json` pointing at a server that no longer exists.
+
+**Two of every tool** — you have both the 1.x `codex-review-server` and the
+plugin registered. `claude mcp remove codex-review-server`; see [Upgrading from
+1.x](#upgrading-from-1x).
+
+**`No module named pytest` from `verify_command`** — the command runs in your
+project, not this server's virtualenv. Point it at the right interpreter:
+`--verify ".venv/bin/pytest -q"`.
 
 Test the pieces independently:
 
@@ -302,8 +448,14 @@ codex exec "Reply with just hello" --sandbox read-only --skip-git-repo-check
 ```bash
 claude plugin uninstall codex-delegate     # plugin install
 claude mcp remove codex-delegate           # manual install
+claude mcp remove codex-review-server      # 1.x install, if still registered
 rm -rf ~/.codex-review-server              # job records
 ```
+
+Removing the server doesn't cancel jobs already running — workers are detached
+so they survive a server restart. Check with `codex_status` and `codex_cancel`
+anything in flight *before* uninstalling, or those Codex processes will run to
+completion on their own.
 
 ## License
 

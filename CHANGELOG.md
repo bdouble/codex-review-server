@@ -11,6 +11,18 @@ Turns a review-only server into a general delegation server: Claude Code can now
 hand Codex any task and manage it like a subagent. Adds the GPT-5.6 model class,
 background jobs, session resume, and verification grounded in git.
 
+**Upgrading from 1.x** — see [Upgrading from
+1.x](README.md#upgrading-from-1x) in the README. The short version:
+
+1. `claude mcp remove codex-review-server`, then install the plugin. Leaving the
+   old registration in place gives you two copies of every tool.
+2. Tools now return a `job_id` instead of blocking for output. Collect with
+   `codex_result(job_id)`, or keep the old blocking feel with
+   `codex_status(job_id, wait=True)`.
+3. If your `.env` pins `CODEX_REVIEW_MODEL=gpt-5.3-codex`, change it — that
+   model is deprecated and returns HTTP 400 on every call. Deleting the line
+   takes the new default.
+
 ### Fixed
 
 - **The default model was dead.** `gpt-5.3-codex` was deprecated server-side by
