@@ -11,6 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import jobs
 
+# Captured before the autouse fixture stubs it out, so the tests that exercise
+# the identity check itself can put the real implementation back.
+_REAL_IS_OUR_WORKER = jobs._is_our_worker
+
 
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
@@ -20,7 +24,9 @@ def isolated_state(tmp_path, monkeypatch):
     # Tests stand in for a live worker using their own pid, which is not
     # actually running worker.py. Treat this process as a legitimate worker so
     # the identity check doesn't reconcile every simulated job away.
-    monkeypatch.setattr(jobs, "_is_our_worker", lambda pid: pid == os.getpid())
+    monkeypatch.setattr(
+        jobs, "_is_our_worker", lambda pid, job_id="", token="": pid == os.getpid()
+    )
     yield
 
 
@@ -173,18 +179,153 @@ class TestJobIdValidation:
 
 
 class TestWorkerIdentity:
-    def test_terminate_tree_refuses_an_unknown_pid(self, monkeypatch):
+    @pytest.fixture(autouse=True)
+    def real_identity_check(self, monkeypatch):
+        # This class tests _is_our_worker itself, so undo the module-wide stub.
+        # Without this, `_is_our_worker(1, ...) is False` would pass simply
+        # because 1 != os.getpid() — asserting nothing about the real logic.
+        monkeypatch.setattr(jobs, "_is_our_worker", _REAL_IS_OUR_WORKER)
+        yield
+
+    def test_terminate_tree_refuses_an_unconfirmed_pid(self, monkeypatch):
         # PID reuse: signalling a pid we cannot confirm is ours would kill an
         # unrelated process group.
-        monkeypatch.setattr(jobs, "_is_our_worker", lambda pid: False)
+        monkeypatch.setattr(
+            jobs, "_is_our_worker", lambda pid, job_id="", token="": False
+        )
         killed = []
         monkeypatch.setattr(jobs.os, "killpg", lambda *a: killed.append(a))
-        jobs.terminate_tree(4242)
+        jobs.terminate_tree({"id": "x", "worker_pid": 4242})
         assert killed == []
 
-    def test_pid_alive_false_when_identity_unconfirmed(self, monkeypatch):
-        monkeypatch.setattr(jobs, "_is_our_worker", lambda pid: False)
-        assert jobs._pid_alive(os.getpid()) is False
+    def test_worker_alive_false_when_identity_unconfirmed(self, monkeypatch):
+        monkeypatch.setattr(
+            jobs, "_is_our_worker", lambda pid, job_id="", token="": False
+        )
+        assert jobs._worker_alive({"id": "x", "worker_pid": os.getpid()}) is False
+
+    def test_identity_requires_worker_py_in_command(self, monkeypatch):
+        monkeypatch.setattr(
+            jobs, "_process_identity", lambda pid: ("Wed Jul 15 10:00:00 2026", "vim")
+        )
+        assert jobs._is_our_worker(1, "task-a-000000") is False
+
+    def test_identity_requires_the_matching_job_id(self, monkeypatch):
+        # A recycled pid running *another job's* worker must not match: the
+        # command-line check alone would pass here.
+        monkeypatch.setattr(jobs, "_is_our_worker", _REAL_IS_OUR_WORKER)
+        monkeypatch.setattr(
+            jobs, "_process_identity",
+            lambda pid: ("Wed Jul 15 10:00:00 2026", "python worker.py task-b-111111"),
+        )
+        assert jobs._is_our_worker(1, "task-a-000000") is False
+        assert jobs._is_our_worker(1, "task-b-111111") is True
+
+    def test_identity_requires_the_matching_start_time(self, monkeypatch):
+        # Same pid, same argv, but restarted: a different start time proves it
+        # is a different process.
+        monkeypatch.setattr(jobs, "_is_our_worker", _REAL_IS_OUR_WORKER)
+        monkeypatch.setattr(
+            jobs, "_process_identity",
+            lambda pid: ("Wed Jul 15 10:00:00 2026", "python worker.py task-a-000000"),
+        )
+        assert jobs._is_our_worker(1, "task-a-000000", "Wed Jul 15 09:00:00 2026") is False
+        assert jobs._is_our_worker(1, "task-a-000000", "Wed Jul 15 10:00:00 2026") is True
+
+    def test_identity_fails_closed_when_ps_unreadable(self, monkeypatch):
+        monkeypatch.setattr(jobs, "_process_identity", lambda pid: None)
+        assert jobs._is_our_worker(1, "task-a-000000") is False
+
+    def test_start_token_of_this_process_is_readable(self):
+        # Guards the ps -o lstart= parsing against a format surprise.
+        token = jobs.process_start_token(os.getpid())
+        assert token and len(token) > 10
+
+
+class TestOrphanReaping:
+    def test_reaps_codex_left_by_a_dead_worker(self, monkeypatch):
+        # A SIGKILLed worker cannot stop codex; nothing else ever would.
+        killed = []
+        monkeypatch.setattr(jobs, "_is_our_codex", lambda pid, job_id: True)
+        monkeypatch.setattr(jobs.os, "getpgid", lambda pid: pid)
+        monkeypatch.setattr(jobs.os, "killpg", lambda pgid, sig: killed.append(pgid))
+        assert jobs.reap_orphan_codex({"id": "task-a-000000", "codex_pid": 5150})
+        assert killed == [5150]
+
+    def test_does_not_reap_an_unrelated_codex(self, monkeypatch):
+        # The user's own codex session must never be killed.
+        killed = []
+        monkeypatch.setattr(
+            jobs, "_process_identity",
+            lambda pid: ("Wed Jul 15 10:00:00 2026", "codex exec -o /x/other-job.out"),
+        )
+        monkeypatch.setattr(jobs.os, "killpg", lambda *a: killed.append(a))
+        assert not jobs.reap_orphan_codex({"id": "task-a-000000", "codex_pid": 5150})
+        assert killed == []
+
+    def test_no_codex_pid_is_a_no_op(self):
+        assert not jobs.reap_orphan_codex({"id": "task-a-000000"})
+
+    def test_reconcile_reaps_and_reports(self, monkeypatch):
+        reaped = []
+        monkeypatch.setattr(
+            jobs, "reap_orphan_codex", lambda r: bool(reaped.append(r["id"])) or True
+        )
+        record = _make()
+        jobs.update_job(record["id"], status="running", worker_pid=999999, codex_pid=1)
+        loaded = jobs.read_job(record["id"])
+        assert reaped == [record["id"]]
+        assert "orphaned codex process was terminated" in loaded["error"]
+
+
+class TestRepoLock:
+    def _active(self, project_dir, write):
+        record = jobs.create_job(
+            "delegate",
+            {"project_dir": project_dir, "write": write, "model": "m", "effort": "e"},
+        )
+        jobs.update_job(record["id"], status="running", worker_pid=os.getpid())
+        return record
+
+    def test_writer_blocks_writer(self, tmp_path):
+        self._active(str(tmp_path), write=True)
+        assert jobs.find_conflict(str(tmp_path), write=True) is not None
+
+    def test_writer_blocks_reader(self, tmp_path):
+        self._active(str(tmp_path), write=True)
+        assert jobs.find_conflict(str(tmp_path), write=False) is not None
+
+    def test_reader_blocks_writer(self, tmp_path):
+        self._active(str(tmp_path), write=False)
+        assert jobs.find_conflict(str(tmp_path), write=True) is not None
+
+    def test_readers_may_share_a_tree(self, tmp_path):
+        # Readers change nothing, so there is nothing to corrupt or misattribute.
+        self._active(str(tmp_path), write=False)
+        assert jobs.find_conflict(str(tmp_path), write=False) is None
+
+    def test_different_repos_never_conflict(self, tmp_path):
+        other = tmp_path / "other"
+        other.mkdir()
+        self._active(str(tmp_path), write=True)
+        assert jobs.find_conflict(str(other), write=True) is None
+
+    def test_terminal_job_releases_the_lock(self, tmp_path):
+        record = self._active(str(tmp_path), write=True)
+        jobs.update_job(record["id"], status="completed", worker_pid=None)
+        assert jobs.find_conflict(str(tmp_path), write=True) is None
+
+    def test_dead_worker_releases_the_lock(self, tmp_path):
+        # Reconciliation runs inside find_conflict's list_jobs(), so a crashed
+        # job cannot hold a tree hostage.
+        record = self._active(str(tmp_path), write=True)
+        jobs.update_job(record["id"], worker_pid=999999)
+        assert jobs.find_conflict(str(tmp_path), write=True) is None
+
+    def test_paths_are_compared_canonically(self, tmp_path):
+        self._active(str(tmp_path), write=True)
+        messy = str(tmp_path) + "/./"
+        assert jobs.find_conflict(messy, write=True) is not None
 
 
 class TestLaunchFailure:

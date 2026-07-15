@@ -99,6 +99,37 @@ branch through the server itself, then reproducing each one:
   launcher bootstraps its own virtualenv on first run.
 - **Test suite** — 148 tests, no Codex calls required.
 
+### Added — concurrency safety and process teardown
+
+- **Reader/writer lock per working tree.** A write job now takes the tree
+  exclusively; readers may share with other readers. Conflicting launches are
+  rejected with `repo_busy` naming the blocking job, instead of two jobs quietly
+  corrupting each other's edits or a reader reporting a writer's changes as its
+  own read-only violation. Enforced atomically, since parallel tool calls
+  genuinely race in FastMCP's thread pool.
+
+  Worktree isolation was evaluated and rejected: a worktree is built from a
+  commit, so it contains neither uncommitted work (Codex would silently edit
+  stale code and report success) nor untracked files like `.env`/`.venv` (so
+  `verify_command` would fail). Refusing the unsafe combination is the honest
+  trade; the reference implementations only document the hazard.
+
+- **Worker identity is now provable.** A recorded pid is trusted only if the
+  process is running `worker.py`, carries *this* job's id in its argv, and
+  matches the start-time token captured when the worker published its pid. Both
+  the start time and command line come from a single `ps` call, so this costs
+  nothing over the previous weaker check. Previously a recycled pid could make a
+  dead job look alive forever, or make cancellation signal an unrelated process
+  group.
+
+- **Orphaned codex processes are reaped.** The codex pid is recorded, workers
+  turn SIGTERM/SIGINT into a clean shutdown that stops codex on the way out, and
+  reconciliation kills any codex a dead worker left behind. The server also
+  sweeps unfinished jobs from a previous session at startup. An orphaned codex
+  keeps editing files, holds its own MCP servers open, and burns quota
+  indefinitely — one was found on the development machine still running after
+  seven days.
+
 ### Changed
 
 - **BREAKING: every tool returns a `job_id` instead of blocking for output.**

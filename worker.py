@@ -10,6 +10,7 @@ Invoked as:  python3 worker.py <job_id>
 
 import json
 import os
+import signal
 import sys
 import time
 
@@ -92,6 +93,8 @@ def run(job_id: str) -> None:
         status="running",
         phase="starting",
         worker_pid=os.getpid(),
+        # Our start time, so a recycled pid can never be mistaken for us.
+        worker_token=jobs.process_start_token(os.getpid()),
         started_at=time.time(),
     )
 
@@ -138,6 +141,11 @@ def run(job_id: str) -> None:
                 command = str(item.get("command", ""))[:160]
                 jobs.append_log(job_id, f"ran: {command} (exit {item.get('exit_code')})")
 
+    def on_spawn(codex_pid):
+        # Recorded immediately so a SIGKILLed worker still leaves enough behind
+        # for reconciliation to find and reap this codex process.
+        jobs.update_job(job_id, codex_pid=codex_pid)
+
     try:
         result = run_codex(
             project_dir=project_dir,
@@ -152,6 +160,7 @@ def run(job_id: str) -> None:
             schema_file=schema_file,
             resume_thread_id=request.get("resume_thread_id"),
             on_event=on_event,
+            on_spawn=on_spawn,
         )
     except CodexError as exc:
         # The sentinel file, not the record field — a concurrent phase write
@@ -221,6 +230,27 @@ def run(job_id: str) -> None:
     )
 
 
+def _install_signal_handlers() -> None:
+    """Turn SIGTERM/SIGINT into an exception so cleanup actually runs.
+
+    Python's default SIGTERM disposition kills the interpreter outright: no
+    finally blocks, no cleanup. Codex — our child — would survive, reparent to
+    init, and keep editing files and burning quota with nobody reading it.
+
+    Raising instead lets run_codex's finally block terminate codex on the way
+    out. The job is left mid-flight, which reconciliation then settles.
+
+    (codex_cancel signals the whole process group, so codex already gets its
+    own SIGTERM there. This covers a plain `kill <worker_pid>`, which reaches
+    only the worker.)
+    """
+    def _raise(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _raise)
+    signal.signal(signal.SIGINT, _raise)
+
+
 def _daemonize() -> None:
     """Fork and exit the parent so the real worker is reparented to init.
 
@@ -245,4 +275,5 @@ if __name__ == "__main__":
         print("usage: worker.py <job_id>", file=sys.stderr)
         sys.exit(2)
     _daemonize()
+    _install_signal_handlers()
     run(sys.argv[1])

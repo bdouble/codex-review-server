@@ -202,11 +202,15 @@ def run_codex(
     schema_file: str | None = None,
     resume_thread_id: str | None = None,
     on_event=None,
+    on_spawn=None,
 ) -> dict:
     """Run codex, streaming its JSONL events.
 
     Returns {thread_id, usage, output, structured_output, timed_out, exit_code}.
     Raises the typed Codex errors on a recognized failure.
+
+    on_spawn(pid) is called as soon as codex starts, so the caller can record
+    the pid and reap it later if this process dies without cleaning up.
     """
     cmd = build_command(
         model=model,
@@ -235,6 +239,9 @@ def run_codex(
             stderr=err_handle,
             text=True,
         )
+
+        if on_spawn:
+            on_spawn(proc.pid)
 
         def _kill():
             state["timed_out"] = True

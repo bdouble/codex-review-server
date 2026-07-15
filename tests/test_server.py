@@ -35,7 +35,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(server_module, "find_codex_binary", lambda: "/usr/bin/codex")
     # Tests simulate a live worker with their own pid; let the identity check
     # accept it (see tests/test_jobs.py for the same shim).
-    monkeypatch.setattr(jobs, "_is_our_worker", lambda pid: pid == os.getpid())
+    monkeypatch.setattr(
+        jobs, "_is_our_worker", lambda pid, job_id="", token="": pid == os.getpid()
+    )
     yield
 
 
@@ -138,6 +140,67 @@ class TestDelegateLaunch:
     def test_next_step_names_the_job(self, project):
         result = _call(codex_delegate, task="do x", project_dir=project)
         assert result["job_id"] in result["next_step"]
+
+
+class TestRepoLock:
+    def _running(self, project, write):
+        started = _call(
+            codex_delegate, task="first", project_dir=project, write=write
+        )
+        jobs.update_job(started["job_id"], status="running", worker_pid=os.getpid())
+        return started["job_id"]
+
+    def test_second_writer_is_rejected(self, project):
+        first = self._running(project, write=True)
+        result = _call(codex_delegate, task="second", project_dir=project, write=True)
+        assert result["error"] == "repo_busy"
+        assert result["blocking_job_id"] == first
+        assert "corrupt each other" in result["message"]
+
+    def test_reader_rejected_while_a_writer_runs(self, project):
+        self._running(project, write=True)
+        result = _call(codex_delegate, task="second", project_dir=project)
+        assert result["error"] == "repo_busy"
+
+    def test_writer_rejected_while_a_reader_runs(self, project):
+        self._running(project, write=False)
+        result = _call(codex_delegate, task="second", project_dir=project, write=True)
+        assert result["error"] == "repo_busy"
+
+    def test_two_readers_are_allowed(self, project):
+        self._running(project, write=False)
+        result = _call(codex_delegate, task="second", project_dir=project)
+        assert result["status"] == "started"
+
+    def test_other_repos_are_unaffected(self, project, tmp_path):
+        other = tmp_path / "other"
+        other.mkdir()
+        self._running(project, write=True)
+        result = _call(codex_delegate, task="second", project_dir=str(other), write=True)
+        assert result["status"] == "started"
+
+    def test_lock_releases_when_the_job_finishes(self, project):
+        first = self._running(project, write=True)
+        jobs.update_job(first, status="completed", worker_pid=None)
+        result = _call(codex_delegate, task="second", project_dir=project, write=True)
+        assert result["status"] == "started"
+
+    def test_review_and_fix_takes_the_write_lock(self, project):
+        self._running(project, write=False)
+        result = _call(codex_review_and_fix, project_dir=project)
+        assert result["error"] == "repo_busy"
+
+    def test_message_names_the_remedies(self, project):
+        self._running(project, write=True)
+        result = _call(codex_delegate, task="second", project_dir=project, write=True)
+        assert "codex_status" in result["message"]
+        assert "codex_cancel" in result["message"]
+
+    def test_no_job_is_created_when_rejected(self, project):
+        self._running(project, write=True)
+        _call(codex_delegate, task="second", project_dir=project, write=True)
+        # The rejected launch must not leave a phantom record behind.
+        assert len(jobs.list_jobs()) == 1
 
 
 class TestFollowUp:
@@ -259,7 +322,10 @@ class TestCancel:
 
     def test_cancel_signals_the_live_worker_tree(self, project, monkeypatch):
         killed = []
-        monkeypatch.setattr(jobs, "terminate_tree", lambda pid: killed.append(pid))
+        monkeypatch.setattr(
+            jobs, "terminate_tree", lambda record: killed.append(record["worker_pid"])
+        )
+        monkeypatch.setattr(jobs, "reap_orphan_codex", lambda record: False)
         started = _call(codex_delegate, task="do x", project_dir=project)
         # A live pid: the only case where there is anything to signal.
         jobs.update_job(started["job_id"], status="running", worker_pid=os.getpid())

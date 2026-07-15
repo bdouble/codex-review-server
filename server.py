@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -32,6 +33,11 @@ from config import Config
 server = FastMCP("codex-review-server")
 
 _WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "worker.py")
+
+# Serializes the conflict-check/create pair in _launch. FastMCP runs sync tools
+# in a thread pool, so two delegate calls issued together genuinely race — and
+# that parallel fan-out is exactly the case the repo lock exists to protect.
+_launch_lock = threading.Lock()
 
 for _warning in Config.validate():
     print(f"[codex-review-server] WARNING: {_warning}", file=sys.stderr)
@@ -67,6 +73,31 @@ def _spawn_worker(job_id: str) -> None:
     except subprocess.TimeoutExpired:
         # The launcher should exit at once; never block a tool call on it.
         pass
+
+
+def _conflict_message(conflict: dict, project_dir: str, write: bool) -> str:
+    """Explain a repo_busy rejection and what to do about it."""
+    other_writes = bool((conflict.get("request") or {}).get("write"))
+    if write and other_writes:
+        reason = "Two jobs writing the same working tree interleave edits and corrupt each other."
+    elif write:
+        reason = (
+            "Starting a writer while a read-only job is running would make that "
+            "job report your edits as its own read-only violation."
+        )
+    else:
+        reason = (
+            "A read-only job running alongside a writer sees the writer's edits "
+            "and reports them as its own violation."
+        )
+    return (
+        f"{conflict['id']} ({conflict.get('job_class')}, "
+        f"{'write' if other_writes else 'read-only'}) is already active in "
+        f"{project_dir}. {reason}\n"
+        f"Options: wait for it with codex_status('{conflict['id']}', wait=True), "
+        f"cancel it with codex_cancel('{conflict['id']}'), or run against a "
+        f"different repository."
+    )
 
 
 def _resolve_settings(model: str, effort: str) -> tuple[str, str, str | None]:
@@ -112,7 +143,19 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
         **request_fields,
     }
 
-    record = jobs.create_job(kind, request)
+    # Check-and-claim must be atomic, or two concurrent launches both see a
+    # free tree and both start.
+    with _launch_lock:
+        conflict = jobs.find_conflict(project_dir, write)
+        if conflict:
+            return _error(
+                "repo_busy",
+                _conflict_message(conflict, project_dir, write),
+                blocking_job_id=conflict["id"],
+                blocking_job_status=conflict.get("status"),
+            )
+        record = jobs.create_job(kind, request)
+
     _spawn_worker(record["id"])
 
     return json.dumps({
@@ -414,9 +457,8 @@ def codex_cancel(job_id: str) -> str:
         }, indent=2)
 
     jobs.request_cancel(resolved)
-    pid = record.get("worker_pid")
-    if pid:
-        jobs.terminate_tree(pid)
+    jobs.terminate_tree(record)
+    jobs.reap_orphan_codex(record)
     jobs.append_log(resolved, "cancellation requested")
 
     # The worker records the terminal state on exit; if it was already gone,
@@ -578,5 +620,29 @@ def codex_fix(
     )
 
 
+def _startup_sweep() -> None:
+    """Settle jobs left unfinished by a previous session.
+
+    Startup is when a prior server's workers are most likely to have died, and
+    reconciliation both settles their records and reaps any codex they left
+    running. Kept out of import so that merely importing this module has no
+    side effects on real job state.
+    """
+    try:
+        stale = jobs.sweep_orphans()
+        if stale:
+            print(
+                f"[codex-review-server] settled {stale} unfinished job(s) from "
+                f"a previous session",
+                file=sys.stderr,
+            )
+    except Exception as exc:  # noqa: BLE001 - never block startup on housekeeping
+        print(
+            f"[codex-review-server] WARNING: orphan sweep failed: {exc}",
+            file=sys.stderr,
+        )
+
+
 if __name__ == "__main__":
+    _startup_sweep()
     server.run(transport="stdio")

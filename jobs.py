@@ -148,30 +148,105 @@ def read_log(job_id: str, tail_lines: int = 40) -> list[str]:
     return lines[-tail_lines:]
 
 
-def _is_our_worker(pid: int) -> bool:
-    """Check the pid actually belongs to one of our workers.
+def _process_identity(pid: int) -> tuple[str, str] | None:
+    """Return (start_time, command_line) for a pid, or None if unreadable.
 
-    PIDs are reused. After a reboot or a long gap, a recorded worker_pid can
-    belong to something else entirely — which would make a dead job look alive
-    forever, and (far worse) make terminate_tree signal an unrelated process
-    group. Matching the command line makes both failures impossible.
+    Both fields come from one `ps` call — the start time costs nothing extra
+    over reading the command line alone.
     """
     try:
         result = subprocess.run(
-            ["ps", "-o", "command=", "-p", str(pid)],
+            ["ps", "-o", "lstart=,command=", "-p", str(pid)],
             capture_output=True,
             text=True,
             timeout=10,
             stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, OSError):
-        # Can't confirm identity — assume it is not ours rather than risk
-        # signalling a stranger.
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+
+    # lstart is a fixed-width 24-char ctime string: "Wed Jul 15 15:29:38 2026".
+    raw = result.stdout.rstrip("\n")
+    return raw[:24].strip(), raw[24:].strip()
+
+
+def process_start_token(pid: int) -> str:
+    """Start time of a pid, used as an identity token. Empty if unavailable."""
+    identity = _process_identity(pid)
+    return identity[0] if identity else ""
+
+
+def _is_our_worker(pid: int, job_id: str = "", token: str = "") -> bool:
+    """Check a pid is *this job's* worker, not a coincidence.
+
+    PIDs get reused. A recorded worker_pid can come to belong to something else
+    after a reboot or a long gap — which makes a dead job look alive forever
+    and, far worse, makes terminate_tree signal an unrelated process group.
+
+    Three independent signals, cheap because they share one `ps` call:
+      - the command line is running worker.py
+      - it carries *this* job's id (the worker is exec'd as `worker.py <id>`),
+        so another job's worker on a recycled pid does not match
+      - the process start time equals the token recorded when the worker
+        published its pid, so a recycled pid cannot impersonate it at all
+
+    Fails closed: if identity cannot be established, the pid is not ours.
+    """
+    identity = _process_identity(pid)
+    if identity is None:
         return False
-    return result.returncode == 0 and "worker.py" in result.stdout
+
+    start_time, command = identity
+    if "worker.py" not in command:
+        return False
+    if job_id and job_id not in command:
+        return False
+    if token and start_time != token:
+        return False
+    return True
 
 
-def _pid_alive(pid: int | None) -> bool:
+def _is_our_codex(pid: int, job_id: str) -> bool:
+    """Check a pid is the codex process this job spawned.
+
+    Codex is invoked with `-o <jobs_dir>/<job_id>.out`, so the job id appears
+    in its argv — a precise identity match that cannot hit an unrelated codex
+    the user is running themselves.
+    """
+    identity = _process_identity(pid)
+    if identity is None:
+        return False
+    _, command = identity
+    return "codex" in command and job_id in command
+
+
+def reap_orphan_codex(record: dict) -> bool:
+    """Kill a codex process left behind by a dead worker. True if it killed one.
+
+    Normally the worker cleans up: it kills codex on its way out, and cancel
+    signals the whole process group. Neither survives SIGKILL of the worker,
+    though — and codex then reparents to init and keeps running, holding its
+    own MCP servers open and burning quota, potentially for days. Nothing else
+    will ever clean it up, so reconciliation does.
+    """
+    pid = record.get("codex_pid")
+    if not pid or not _is_our_codex(pid, record.get("id", "")):
+        return False
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return False
+    return True
+
+
+def _worker_alive(record: dict) -> bool:
+    """Is this record's worker still running and still genuinely its worker?"""
+    pid = record.get("worker_pid")
     if not pid:
         return False
     try:
@@ -181,7 +256,7 @@ def _pid_alive(pid: int | None) -> bool:
     except PermissionError:
         # Exists but owned by another user — so definitely not our worker.
         return False
-    return _is_our_worker(pid)
+    return _is_our_worker(pid, record.get("id", ""), record.get("worker_token", ""))
 
 
 def read_job(job_id: str, reconcile_state: bool = True) -> dict | None:
@@ -213,7 +288,7 @@ def reconcile(record: dict) -> dict:
     """
     if record.get("status") not in ACTIVE_STATUSES:
         return record
-    if _pid_alive(record.get("worker_pid")):
+    if _worker_alive(record):
         return record
 
     if record.get("status") == "queued" and record.get("worker_pid") is None:
@@ -235,6 +310,10 @@ def reconcile(record: dict) -> dict:
             record["completed_at"] = time.time()
             return write_job(record)
 
+    # The worker is gone. If it was SIGKILLed it had no chance to stop codex,
+    # which would otherwise run on orphaned indefinitely.
+    reaped = reap_orphan_codex(record)
+
     if is_cancel_requested(record["id"]) or record.get("cancel_requested"):
         record["status"] = "cancelled"
         record["error"] = "Cancelled by request."
@@ -243,6 +322,7 @@ def reconcile(record: dict) -> dict:
         record["error"] = (
             "Worker exited without recording a result "
             "(killed, crashed, or the machine restarted)."
+            + (" Its orphaned codex process was terminated." if reaped else "")
         )
     record["phase"] = "failed" if record["status"] == "failed" else "cancelled"
     record["completed_at"] = record.get("completed_at") or time.time()
@@ -288,6 +368,68 @@ def resolve_job_id(reference: str) -> str:
             f"{', '.join(matches[:5])}"
         )
     return matches[0]
+
+
+def sweep_orphans() -> int:
+    """Settle every stale job and reap any codex they left behind.
+
+    list_jobs() reconciles each record, and reconciliation kills orphaned codex
+    processes — so this is just "reconcile everything now" rather than waiting
+    for someone to happen to poll the right job. Called at server startup, the
+    point where a previous session's workers are most likely to have been
+    killed with their codex still running.
+    """
+    settled = 0
+    for record in list_jobs():
+        if record.get("status") in TERMINAL_STATUSES and record.get("completed_at"):
+            continue
+        settled += 1
+    return settled
+
+
+def canonical_dir(path: str) -> str:
+    """Resolve a project dir for comparison, following symlinks."""
+    if not path:
+        return ""
+    return os.path.realpath(os.path.expanduser(path))
+
+
+def find_conflict(project_dir: str, write: bool) -> dict | None:
+    """Return an active job that a new job on this working tree would clash
+    with, or None if it is safe to start.
+
+    Codex edits a real working tree, and verification reads global git state,
+    so two jobs sharing one tree interfere in two distinct ways:
+
+      - two writers interleave edits and corrupt each other's work
+      - a reader alongside a writer sees the writer's edits and reports them
+        as its own read-only violation
+
+    Readers do not change files, so any number of them can share a tree
+    safely. The rule is therefore a reader/writer lock: a writer needs the tree
+    exclusively; readers only exclude writers.
+
+    Worktree isolation would be the alternative, but a worktree is built from a
+    commit — it would not contain uncommitted work (so Codex would silently
+    edit stale code) or untracked files like .env and .venv (so verify_command
+    would fail). Refusing the unsafe combination is the honest trade.
+
+    Reconciliation runs during list_jobs(), so a crashed job's stale record
+    cannot hold the lock.
+    """
+    target = canonical_dir(project_dir)
+    if not target:
+        return None
+
+    for record in list_jobs():
+        if record.get("status") not in ACTIVE_STATUSES:
+            continue
+        if canonical_dir(record.get("project_dir") or "") != target:
+            continue
+        other_writes = bool((record.get("request") or {}).get("write"))
+        if write or other_writes:
+            return record
+    return None
 
 
 def latest_job(job_class: str | None = None) -> dict | None:
@@ -338,18 +480,22 @@ def create_job(job_class: str, request: dict) -> dict:
     return record
 
 
-def terminate_tree(pid: int) -> None:
-    """Kill a worker and the codex process it spawned.
+def terminate_tree(record: dict) -> None:
+    """Kill a job's worker and the codex process it spawned.
 
     The worker starts its own process group (start_new_session), so signalling
     the group reaches codex and any shells it spawned. Without this, killing
     only the worker would orphan a codex run that keeps burning quota.
+
+    Takes the whole record, not a bare pid, so identity can be confirmed
+    against the job id and start-time token before anything is signalled.
     """
+    pid = record.get("worker_pid")
     if not pid:
         return
-    # Never signal a pid we cannot confirm is ours: after PID reuse this would
-    # kill an unrelated process group.
-    if not _is_our_worker(pid):
+    # Never signal a pid we cannot prove is this job's worker: after PID reuse
+    # this would kill an unrelated process group.
+    if not _is_our_worker(pid, record.get("id", ""), record.get("worker_token", "")):
         return
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)

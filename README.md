@@ -117,9 +117,10 @@ Two limits worth knowing:
   yourself. It executes *after* file changes are computed, so test caches aren't
   misattributed to Codex.
 - **Verification reads global git state**, so it can't tell one actor from
-  another. Run one job per working tree: a reader alongside a writer will report
-  the writer's edits as a read-only violation, and your own concurrent edits get
-  attributed to the job. Parallel jobs want separate repos or separate worktrees.
+  another. The server enforces one writer per working tree (readers may share);
+  a conflicting launch is rejected with `repo_busy` naming the blocker. Parallel
+  jobs want separate repos. The lock can't stop *you*, though — your own edits
+  during a job get attributed to it.
 
 ## Install
 

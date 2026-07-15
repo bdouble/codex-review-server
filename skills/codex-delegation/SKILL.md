@@ -82,17 +82,26 @@ sandbox — `write=False` constrains Codex, not that command. It comes from you,
 not the model, so Codex can't inject one; just don't pass anything you wouldn't
 run yourself.
 
-**One repo, one job at a time.** This is stricter than it sounds, and it's a
-real constraint rather than a style preference:
+**One writer per working tree — and the server enforces it.** A writer needs the
+tree exclusively; readers can share with other readers. A conflicting launch is
+rejected with `repo_busy` naming the blocking job, because:
 
-- Two writers in one working tree interleave edits and corrupt each other.
-- A reader running alongside a writer will report the *writer's* edits as a
-  read-only violation. Verification reads global git state and cannot tell
-  which agent — or which human — made a change.
+- Two writers in one tree interleave edits and corrupt each other.
+- A reader alongside a writer reports the *writer's* edits as its own read-only
+  violation. Verification reads global git state and cannot tell which agent —
+  or which human — made a change.
 
-So parallel jobs must target **different repositories**, or each write job needs
-its own git worktree. If you're editing files yourself while a job runs, expect
-its verification to attribute your edits to it.
+So parallel jobs must target **different repositories**. On `repo_busy`, wait
+(`codex_status(id, wait=True)`), cancel the blocker, or pick another repo — don't
+retry in a loop.
+
+Worktrees are deliberately *not* used to work around this: a worktree is built
+from a commit, so it wouldn't contain uncommitted work (Codex would silently
+edit stale code) or untracked files like `.env` and `.venv` (so `verify_command`
+would fail).
+
+The lock can't stop *you*. If you edit files while a job runs, its verification
+will attribute your edits to it.
 
 ## Verification: the part that matters
 
@@ -147,6 +156,7 @@ is indistinguishable from a hang.
 | `codex_not_found` | CLI not installed | `npm i -g @openai/codex` |
 | auth failure | Session expired | The user runs `codex login` — you cannot do it for them |
 | `invalid_model` | Deprecated slug or bad effort for that model | Check `codex_models` |
+| `repo_busy` | Another job holds that working tree | Wait for it, cancel it, or use a different repo — never retry in a loop |
 | `status: timeout` | Deadline hit | Output is salvaged partial work — treat as incomplete. Narrow the task or raise `CODEX_TIMEOUT` |
 | Job stuck `running` | Long `max`/`ultra` run | Check `phase`. Cancel with `codex_cancel` if genuinely wedged |
 
