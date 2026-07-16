@@ -5,6 +5,38 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-07-15
+
+A version bump so `error_type` reliably reaches callers.
+
+The field was added late in 2.0.0's development, while reviewing PR #1, and never
+recorded here. By then a pre-merge 2.0.0 had already been installed and cached —
+and because the version string never moved, that cache had no reason to refresh.
+So two materially different trees both answer to "2.0.0": one that returns
+`error_type`, one that does not. A caller that branches on the field gets `None`
+from the older tree and quietly treats every rate limit as an outage, which is
+exactly the failure the field exists to prevent.
+
+Nothing in the server changes here. This release exists to give stale installs a
+version to move to, and to finally write the field down.
+
+### Added
+
+- **`error_type` on every read path — now documented.** `codex_status` and
+  `codex_result` return a failed job's classification alongside the `error` prose:
+  `rate_limit`, `auth_error`, `codex_not_found`, `codex_error`, or `worker_error`;
+  `null` on a healthy job. Branch on it rather than pattern-matching the message,
+  which is written for the user and will change. The values are stable slugs, not
+  exception class names, so an internal rename cannot quietly break a caller. Full
+  table in [skills/codex-delegation](skills/codex-delegation/SKILL.md).
+
+### Upgrading
+
+If you installed 2.0.0 before PR #1 merged, you are running a tree that predates
+that review's fixes — `error_type`, the three-state `verified` verdict, the
+widened deny-list, and the enforced codex timeout among them. Reinstall to pick
+them up; the version change is what lets the install see there is anything to do.
+
 ## [2.0.0] — 2026-07-15
 
 Turns a review-only server into a general delegation server: Claude Code can now
