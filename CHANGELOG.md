@@ -120,7 +120,7 @@ branch through the server itself, then reproducing each one:
   `/codex:follow-up`, `/codex:cancel`, `/codex:models`), and a `codex-delegation`
   skill covering model choice, verification discipline, and fan-out. The
   launcher bootstraps its own virtualenv on first run.
-- **Test suite** — 287 tests, no Codex calls required.
+- **Test suite** — 292 tests, no Codex calls required.
 
 ### Added — concurrency safety and process teardown
 

@@ -111,6 +111,9 @@ hypothesis and the `verification` block as the evidence.
 Always read `verification` before the prose:
 
 - `verified: false` → lead with that, and name the failing check.
+- `verified: null` → nothing could be checked (usually: not a git repo).
+  Say so plainly. It is not a pass, and it is not a failure either — do
+  not report it as either one.
 - `files_changed: warn` on a write job → git shows nothing changed. Either it
   concluded no change was needed, or it is reporting work it didn't do. Check
   `git diff` before repeating anything.
@@ -170,7 +173,7 @@ Errors returned by the *tool call* itself, before any job exists, have an
 | `repo_busy` | Another job holds that working tree | Wait for it, cancel it, or use a different repo — never retry in a loop |
 | `store_busy` | Another launch is mid-claim on the job store | Retry once after a moment |
 | `not_a_repo` | `codex_review`/`codex_review_and_fix` outside a git repo — they review a branch diff, so there is nothing to read | Point at a repository, or use `codex_delegate` for an ordinary directory |
-| `unsafe_project_dir` | A write task aimed at a home or system root, which would hand Codex every file beneath it | Almost always a path one segment short — name the actual project directory |
+| `unsafe_project_dir` | A task aimed at a home or system root. A write there gets every file beneath it; even a read-only one reads the whole home directory and sends what it reads upstream | Almost always a path one segment short — name the actual project directory |
 | `status: timeout` | Deadline hit | Output is salvaged partial work — treat as incomplete. Narrow the task or raise `CODEX_TIMEOUT` |
 | Job stuck `running` | Long `max`/`ultra` run | Check `phase`. Cancel with `codex_cancel` if genuinely wedged |
 

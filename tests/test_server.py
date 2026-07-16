@@ -521,11 +521,19 @@ class TestUnsafeProjectDir:
         result = _call(codex_delegate, task="do x", project_dir="/tmp", write=True)
         assert result["error"] == "unsafe_project_dir"
 
-    def test_read_only_at_home_is_allowed(self, tmp_path, monkeypatch):
-        # Nothing to destroy, and the guard is about blast radius. A read-only
-        # run here is unwise, not dangerous — a different conversation.
+    def test_read_only_at_home_is_also_refused(self, tmp_path, monkeypatch):
+        # Same typo, different bad outcome: read-only destroys nothing but
+        # still reads the whole home directory and sends it upstream. The
+        # guard covers both rather than only the loud one.
         monkeypatch.setenv("HOME", str(tmp_path))
         result = _call(codex_delegate, task="what is here", project_dir=str(tmp_path))
+        assert result["error"] == "unsafe_project_dir"
+
+    def test_read_only_below_home_is_unaffected(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        notes = tmp_path / "Documents" / "second-brain"
+        notes.mkdir(parents=True)
+        result = _call(codex_delegate, task="what is here", project_dir=str(notes))
         assert result["status"] == "started"
 
     def test_write_below_home_is_unaffected(self, tmp_path, monkeypatch):

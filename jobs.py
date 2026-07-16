@@ -593,11 +593,14 @@ def create_job(job_class: str, request: dict) -> dict:
 
 
 def terminate_tree(record: dict) -> None:
-    """Kill a job's worker and the codex process it spawned.
+    """Kill a job's worker, and through it the codex run.
 
-    The worker starts its own process group (start_new_session), so signalling
-    the group reaches codex and any shells it spawned. Without this, killing
-    only the worker would orphan a codex run that keeps burning quota.
+    Signals the worker's own group (it leads one, via start_new_session). That
+    no longer reaches codex directly — codex leads a group of its own, so that
+    its children can be reaped without taking the worker down with them — but
+    two paths still cover it: the worker turns SIGTERM into SystemExit, which
+    unwinds into run_codex's cleanup, and callers pair this with
+    reap_orphan_codex, which targets codex's group by its recorded pid.
 
     Takes the whole record, not a bare pid, so identity can be confirmed
     against the job id and start-time token before anything is signalled.

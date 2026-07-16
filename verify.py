@@ -329,19 +329,16 @@ def verify(
     checks = []
 
     if not before.get("is_repo"):
-        # A read-only task in an unversioned directory is constrained by the
-        # sandbox, so "could not check" is a fair skip. A write task is not:
-        # nothing observed what it did, and git cannot undo any of it either.
-        # Reporting verified:true there would be a claim we never checked.
         checks.append({
             "name": "git_tracking",
-            "status": "fail" if write else "skip",
+            "status": "skip",
             "detail": (
-                "Not a git repository, so the files this task changed could "
-                "not be verified — and its edits are not recoverable with git. "
-                "Treat its file claims as unchecked."
-                if write
-                else "Not a git repository — file changes could not be verified."
+                "Not a git repository — file changes could not be verified."
+                + (
+                    " This task could write, and git cannot undo what it did, "
+                    "so treat its file claims as unchecked."
+                    if write else ""
+                )
             ),
         })
         report = {"git": {"is_repo": False}, "checks": checks}
@@ -436,6 +433,21 @@ def verify(
             "output_tail": outcome["output_tail"],
         })
 
-    report["verified"] = not any(c["status"] == "fail" for c in checks)
+    # Three states, because "clean" and "unchecked" are not the same claim and
+    # a boolean cannot tell them apart. True said both, which meant a job we
+    # never managed to inspect reported exactly like one we had inspected and
+    # found spotless. Reporting those as False instead is no better: nothing
+    # failed, and crying failure at every task in an unversioned directory —
+    # a supported, first-class use — trains the reader to ignore the field.
+    #
+    #   True  — every applicable check ran, and none failed.
+    #   False — a check ran and actively failed. Something is wrong.
+    #   None  — a check could not run. Nothing is known either way.
+    if any(c["status"] == "fail" for c in checks):
+        report["verified"] = False
+    elif any(c["status"] == "skip" for c in checks):
+        report["verified"] = None
+    else:
+        report["verified"] = True
     report["warnings"] = [c["detail"] for c in checks if c["status"] == "warn"]
     return report

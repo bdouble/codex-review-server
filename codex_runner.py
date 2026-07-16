@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 
@@ -276,17 +277,44 @@ def run_codex(
             stdout=subprocess.PIPE,
             stderr=err_handle,
             text=True,
+            # Codex leads its own process group, so it can be signalled
+            # together with everything it spawns without taking this worker
+            # down too — see _terminate_group, which is the only reason the
+            # timeout is enforceable at all.
+            start_new_session=True,
         )
 
         if on_spawn:
             on_spawn(proc.pid)
 
-        def _kill():
-            state["timed_out"] = True
+        def _terminate_group(sig):
+            """Signal codex *and its descendants*.
+
+            Killing the direct child is not enough, and this is the whole bug:
+            codex spawns MCP servers and shells, they inherit the stdout pipe,
+            and killing only codex leaves them holding its write end open. The
+            reader below then never sees EOF, so the watchdog fires, codex
+            dies, and run_codex blocks on regardless — the job pinned at
+            `running` with its deadline long gone and CODEX_TIMEOUT
+            guaranteeing nothing. Reaping the group closes the pipe.
+            """
             try:
-                proc.kill()
-            except OSError:
-                pass
+                os.killpg(os.getpgid(proc.pid), sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
+        def _kill():
+            # Nothing to time out if it already finished. The timer can fire in
+            # the gap between the reader draining and watchdog.cancel() landing,
+            # and setting the flag there would report a completed run — output
+            # and all — as a timeout.
+            if proc.poll() is not None:
+                return
+            state["timed_out"] = True
+            _terminate_group(signal.SIGKILL)
 
         watchdog = threading.Timer(timeout, _kill)
         watchdog.start()
@@ -319,11 +347,12 @@ def run_codex(
             if proc.stdout:
                 proc.stdout.close()
             # If we leave this block by an exception — on_event raising because
-            # a job write failed, say — codex is still running, and would carry
-            # on editing files and burning quota with nobody reading its output.
-            # Never leave it behind.
+            # a job write failed, or SIGTERM becoming SystemExit in the worker
+            # — codex is still running, and would carry on editing files and
+            # burning quota with nobody reading its output. Never leave it, or
+            # its children, behind.
             if proc.poll() is None:
-                proc.kill()
+                _terminate_group(signal.SIGKILL)
                 try:
                     proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:

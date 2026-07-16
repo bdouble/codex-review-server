@@ -35,7 +35,7 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
   server is declared inline in `plugin.json`; a root `.mcp.json` would be
   loaded as *project* config, where `${CLAUDE_PLUGIN_ROOT}` does not expand.
-- **`tests/`** — 287 pytest tests. No Codex calls; the CLI is stubbed.
+- **`tests/`** — 292 pytest tests. No Codex calls; the CLI is stubbed.
 
 ## Development Commands
 
@@ -71,9 +71,16 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
   tidiness: an unreaped zombie child still answers `kill(pid, 0)`, so a crashed
   worker would pin its job at `running` forever. Reparenting makes PID liveness
   truthful for `jobs.reconcile()`, which settles dead-worker jobs at read time.
-- **Cancel signals the process group.** `start_new_session=True` puts the worker
-  and codex in one group, so `killpg` reaches codex instead of orphaning a run
-  that keeps burning quota.
+- **Codex leads its own process group**, and everything that stops it signals
+  that group rather than the bare pid. This is what makes `CODEX_TIMEOUT`
+  mean anything: codex spawns MCP servers and shells, they inherit its stdout
+  pipe, and killing codex alone leaves them holding the write end open — the
+  reader never sees EOF, so the watchdog fires and `run_codex` blocks on
+  anyway, job pinned at `running` with its deadline long past. Reaping the
+  group closes the pipe. `codex_cancel` reaches codex through
+  `reap_orphan_codex` (which targets codex's own pgid), and the worker's
+  SIGTERM handler unwinds into `run_codex`'s cleanup, so both paths still
+  cover it.
 - **`codex exec`, not `codex app-server`.** The app-server protocol is
   experimental and versioned. `exec` is stable and supports `--output-schema`
   despite the published config reference claiming otherwise.

@@ -1,6 +1,7 @@
 """Tests for codex command construction, prompts, and error classification."""
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -277,3 +278,74 @@ class TestClassifierPrecedence:
         # Not every failure produces turn.failed; stderr is all we have then.
         with pytest.raises(CodexRateLimitError):
             _classify_failure('{"error":"usage_limit_reached"}', "", 1)
+
+
+class TestWatchdogEnforcesTheDeadline:
+    """The timeout has to hold even when codex leaves children behind.
+
+    Regression: `proc.kill()` reaped only codex. Anything it spawned — an MCP
+    server, a shell — inherited the stdout pipe and kept its write end open, so
+    the reader never saw EOF. The watchdog fired, codex died, and run_codex
+    blocked on regardless: the job pinned at `running` with its deadline long
+    past and CODEX_TIMEOUT guaranteeing nothing. Codex spawning children is the
+    normal case, so this was not a race — it was reproducible on demand.
+    """
+
+    @staticmethod
+    def _fake_codex(tmp_path, body):
+        script = tmp_path / "fake_codex.sh"
+        script.write_text(body)
+        script.chmod(0o755)
+        return str(script)
+
+    def _run(self, tmp_path, monkeypatch, body, timeout=2):
+        monkeypatch.setattr(
+            codex_runner, "find_codex_binary",
+            lambda: self._fake_codex(tmp_path, body),
+        )
+        started = time.monotonic()
+        result = codex_runner.run_codex(
+            project_dir=str(tmp_path), prompt="x", model="m", effort="low",
+            sandbox="read-only",
+            output_file=str(tmp_path / "o.txt"),
+            prompt_file=str(tmp_path / "p.txt"),
+            stderr_file=str(tmp_path / "e.txt"),
+            timeout=timeout,
+        )
+        return result, time.monotonic() - started
+
+    def test_a_child_holding_stdout_cannot_outlive_the_timeout(
+        self, tmp_path, monkeypatch
+    ):
+        result, elapsed = self._run(tmp_path, monkeypatch, (
+            "#!/bin/bash\n"
+            "( sleep 60 ) &\n"                   # inherits our stdout pipe
+            'echo \'{"type":"thread.started","thread_id":"t1"}\'\n'
+            "sleep 60\n"
+        ))
+        assert result["timed_out"] is True
+        assert elapsed < 20, f"blocked {elapsed:.1f}s past a 2s timeout"
+
+    def test_a_normal_run_is_not_labelled_a_timeout(self, tmp_path, monkeypatch):
+        result, elapsed = self._run(tmp_path, monkeypatch, (
+            "#!/bin/bash\n"
+            'echo \'{"type":"thread.started","thread_id":"t1"}\'\n'
+            'echo \'{"type":"turn.completed","usage":{"tokens":5}}\'\n'
+        ), timeout=30)
+        assert result["timed_out"] is False
+        assert result["thread_id"] == "t1"
+        assert elapsed < 10
+
+    def test_the_whole_group_is_reaped_not_just_codex(self, tmp_path, monkeypatch):
+        # The orphan this module exists to prevent: a child that survives the
+        # run keeps burning quota with nobody reading it.
+        marker = tmp_path / "orphan_alive"
+        result, _ = self._run(tmp_path, monkeypatch, (
+            "#!/bin/bash\n"
+            f"( sleep 5; touch {marker} ) &\n"
+            'echo \'{"type":"thread.started","thread_id":"t1"}\'\n'
+            "sleep 60\n"
+        ))
+        assert result["timed_out"] is True
+        time.sleep(6)
+        assert not marker.exists(), "codex's child outlived the run"

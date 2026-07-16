@@ -104,7 +104,16 @@ compares the repo against a snapshot taken before the run:
 | `files_changed` | write job | `warn` if git shows nothing changed — it may be claiming work it didn't do |
 | `read_only_respected` | read-only job | `fail` if files changed anyway |
 | `verify_command` | you passed one | `fail` on a non-zero exit — the real one, from your own tests |
-| `git_tracking` | not a git repo | `skip` on a read-only job — file claims are unverifiable. `fail` on a **write** job: nothing observed what it changed and git cannot undo it, so `verified: true` would be a claim about a check that never ran |
+| `git_tracking` | not a git repo | `skip` — nothing could be inspected, so `verified` comes back `null` rather than `true` |
+
+`verified` has three states, because "clean" and "unchecked" are different
+claims and a boolean cannot tell them apart:
+
+| `verified` | Meaning |
+|---|---|
+| `true` | Every applicable check ran, and none failed |
+| `false` | A check ran and actively failed — something is wrong |
+| `null` | A check could not run. Nothing is known either way — the usual case for a task in an unversioned directory |
 
 Pass `verify_command` whenever the repo has tests. It's the difference between
 Codex reporting success and success being observed.

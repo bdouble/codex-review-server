@@ -54,20 +54,23 @@ _UNSAFE_ROOTS = (
 )
 
 
-def _unsafe_write_roots() -> set[str]:
-    """Directories a write task must never be pointed *at*.
+def _unsafe_roots() -> set[str]:
+    """Directories no task should ever be pointed *at*.
 
-    project_dir's only gate is os.path.isdir, and workspace-write scopes codex
-    to the whole tree below whatever it is handed — so `/Users/brian`, one
-    tab-completion short of `/Users/brian/Documents/second-brain`, quietly
-    grants write access to every file in the home directory, `.ssh` and browser
-    profiles included, with no diff to justify it and (outside a repo) no undo.
+    project_dir's only gate is os.path.isdir, so `/Users/brian` — one
+    tab-completion short of `/Users/brian/Documents/second-brain` — is accepted
+    as a project. Both sandboxes then do exactly what they promise, over the
+    wrong tree: workspace-write grants Codex every file in the home directory,
+    `.ssh` and browser profiles included, with no undo outside a repo; and
+    read-only, which destroys nothing, still reads that home directory and
+    sends what it reads to OpenAI. One typo, two different bad outcomes, so the
+    guard covers both rather than only the loud one.
 
     Not a security boundary — codex is not an adversary, and this would be a
-    poor one. It catches the realistic accident: a typo, or a path one segment
-    too short. Membership is by equality, never containment: the point is to
-    reject a root that was named directly, while every real project *inside*
-    these roots stays unaffected.
+    poor one. It catches the realistic accident: a path one segment too short.
+    Membership is by equality, never containment: the point is to reject a root
+    that was named directly, while every real project *inside* these roots
+    stays unaffected.
 
     Resolved per call rather than at import: HOME is environment-dependent, and
     realpath matters because /tmp is /private/tmp on macOS.
@@ -158,13 +161,14 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             "invalid_request", f"project_dir does not exist: {project_dir}"
         )
 
-    if write and jobs.canonical_dir(project_dir) in _unsafe_write_roots():
+    if jobs.canonical_dir(project_dir) in _unsafe_roots():
         return _error(
             "unsafe_project_dir",
-            f"Refusing to run a write task directly in {project_dir}. That is a "
-            f"home or system root, and workspace-write would give Codex every "
-            f"file beneath it — almost always a path one segment short of the "
-            f"project you meant. Name the directory to work in.",
+            f"Refusing to run a task directly in {project_dir}. That is a home "
+            f"or system root: a write task would get every file beneath it, and "
+            f"even a read-only one would read your whole home directory and "
+            f"send what it reads upstream. Almost always a path one segment "
+            f"short of the project you meant — name the directory to work in.",
         )
 
     if kind in _GIT_REQUIRED_KINDS and not verify.repo_root(project_dir):

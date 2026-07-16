@@ -205,21 +205,37 @@ class TestVerify:
         assert report["git"]["committed"] is True
         assert "committed.py" in report["git"]["files_changed"]
 
-    def test_non_repo_skips_git_checks_for_a_read_only_task(self, tmp_path):
+    def test_non_repo_is_unchecked_not_verified(self, tmp_path):
+        # Nothing could be inspected, so the honest answer is neither "clean"
+        # nor "something failed" — it is "unknown".
         before = verify.snapshot(str(tmp_path))
         report = verify.verify(str(tmp_path), before, write=False)
         assert report["git"]["is_repo"] is False
         assert report["checks"][0]["status"] == "skip"
-        assert report["verified"] is True
+        assert report["verified"] is None
 
-    def test_non_repo_write_is_never_reported_as_verified(self, tmp_path):
+    def test_non_repo_write_is_unchecked_and_says_so(self, tmp_path):
         # --skip-git-repo-check lets a write task run against unversioned
-        # files. Nothing observes what it did there and git cannot undo it, so
-        # verified:true would be a claim about a check that never happened.
+        # files. verified:true would claim a check that never ran; verified:
+        # false would cry failure at a supported flow every single time.
         before = verify.snapshot(str(tmp_path))
         report = verify.verify(str(tmp_path), before, write=True)
-        assert report["git"]["is_repo"] is False
-        assert report["checks"][0]["status"] == "fail"
+        assert report["verified"] is None
+        assert report["checks"][0]["status"] == "skip"
+        assert "cannot undo" in report["checks"][0]["detail"]
+
+    def test_a_real_failure_is_still_false_not_unchecked(self, tmp_path):
+        # None must not swallow a genuine failure.
+        import subprocess as sp
+        sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.email", "t@t.co"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+        (tmp_path / "a.py").write_text("x\n")
+        sp.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+        sp.run(["git", "commit", "-qm", "i"], cwd=tmp_path, check=True)
+        before = verify.snapshot(str(tmp_path))
+        (tmp_path / "a.py").write_text("CHANGED\n")
+        report = verify.verify(str(tmp_path), before, write=False)
         assert report["verified"] is False
 
 
