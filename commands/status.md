@@ -1,7 +1,7 @@
 ---
 description: Check Codex job progress, or list all delegated jobs
 argument-hint: "[job-id] [--wait] [--all]"
-allowed-tools: mcp__codex-delegate__codex_status
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_status
 ---
 
 # Codex Job Status

@@ -1,7 +1,7 @@
 ---
 description: Continue a Codex job in its original thread, keeping everything it already learned
 argument-hint: "<job-id> <follow-up task> [--write] [--verify <cmd>]"
-allowed-tools: mcp__codex-delegate__codex_follow_up, mcp__codex-delegate__codex_status, mcp__codex-delegate__codex_result, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*)
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_follow_up, mcp__plugin_codex-delegate_codex-delegate__codex_status, mcp__plugin_codex-delegate_codex-delegate__codex_result, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*)
 ---
 
 # Continue a Codex Job

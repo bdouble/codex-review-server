@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config
 import jobs
 
 # Captured before the autouse fixture stubs it out, so the tests that exercise
@@ -18,8 +19,13 @@ _REAL_IS_OUR_WORKER = jobs._is_our_worker
 
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
-    # CODEX_STATE_DIR is absent from .env, so the live-reload in Config._get
-    # will not clobber this override.
+    # Point the live-reload at an empty file first. Config._get re-reads .env on
+    # every access with override=True, so a developer who uncommented the
+    # CODEX_STATE_DIR line .env.example ships would have it win over this
+    # setenv — and test_prune_deletes_every_sidecar_file would then delete every
+    # terminal job in their real store.
+    monkeypatch.setattr(config, "_ENV_FILE", tmp_path / "empty.env")
+    monkeypatch.setattr(config, "_overridden", {})
     monkeypatch.setenv("CODEX_STATE_DIR", str(tmp_path / "state"))
     # Tests stand in for a live worker using their own pid, which is not
     # actually running worker.py. Treat this process as a legitimate worker so
@@ -305,10 +311,22 @@ class TestRepoLock:
         assert jobs.find_conflict(str(tmp_path), write=False) is None
 
     def test_different_repos_never_conflict(self, tmp_path):
-        other = tmp_path / "other"
-        other.mkdir()
+        one = tmp_path / "one"
+        two = tmp_path / "two"
+        one.mkdir()
+        two.mkdir()
+        self._active(str(one), write=True)
+        assert jobs.find_conflict(str(two), write=True) is None
+
+    def test_subdirectory_of_a_busy_tree_conflicts(self, tmp_path):
+        # Regression: comparing project_dir strings let /repo and /repo/src
+        # both claim one working tree, so two writers started against it and
+        # interleaved their edits — with no repo_busy shown and no race needed.
+        sub = tmp_path / "src"
+        sub.mkdir()
         self._active(str(tmp_path), write=True)
-        assert jobs.find_conflict(str(other), write=True) is None
+        conflict = jobs.find_conflict(str(sub), write=True)
+        assert conflict is not None
 
     def test_terminal_job_releases_the_lock(self, tmp_path):
         record = self._active(str(tmp_path), write=True)
@@ -425,3 +443,108 @@ class TestLatest:
 
     def test_latest_with_no_jobs(self):
         assert jobs.latest_job("nothing") is None
+
+
+class TestCancelDoesNotClobber:
+    def test_cancel_racing_completion_keeps_the_finished_result(self):
+        # The P0 this guards: codex_cancel used to read the record, and the
+        # worker's terminal write could land before the cancel wrote its stale
+        # copy back — destroying the output, usage and verification of a run
+        # that had already finished, then settling it as "cancelled" with
+        # nothing to show for 40 minutes of work.
+        record = _make()
+        jobs.update_job(record["id"], status="running", worker_pid=999999)
+        stale = jobs.read_job(record["id"], reconcile_state=False)
+
+        jobs.update_job(
+            record["id"],
+            status="completed",
+            phase="done",
+            output="THE REPORT",
+            usage={"tokens": 120000},
+            verification={"verified": True},
+            completed_at=time.time(),
+            worker_pid=None,
+        )
+
+        # The cancel proceeds holding the snapshot it read a moment earlier.
+        real_read = jobs.read_job
+        jobs.read_job = lambda job_id, reconcile_state=True: dict(stale)
+        try:
+            jobs.request_cancel(record["id"])
+        finally:
+            jobs.read_job = real_read
+
+        final = jobs.read_job(record["id"])
+        assert final["status"] == "completed"
+        assert final["output"] == "THE REPORT"
+        assert final["usage"] == {"tokens": 120000}
+        assert final["verification"] == {"verified": True}
+
+    def test_cancel_still_registers_for_an_active_job(self):
+        record = _make()
+        jobs.update_job(record["id"], status="running", worker_pid=999999)
+        jobs.request_cancel(record["id"])
+        assert jobs.read_job(record["id"])["status"] == "cancelled"
+
+
+class TestSweepOrphans:
+    def test_counts_what_it_actually_settled(self):
+        # Regression: list_jobs() reconciles on the way out, so counting its
+        # results counted the jobs that were still healthy — the exact inverse
+        # of the number, reported at startup as "settled N unfinished job(s)".
+        # Create every record first: create_job prunes, prune lists, and
+        # listing reconciles — so a job left dead here would already be
+        # settled by the next _make() and never reach the sweep.
+        dead = _make()
+        alive = _make()
+        _make()  # queued, inside its launch grace period
+
+        jobs.update_job(dead["id"], status="running", worker_pid=999999)
+        jobs.update_job(alive["id"], status="running", worker_pid=os.getpid())
+
+        assert jobs.sweep_orphans() == 1
+        assert jobs.read_job(dead["id"])["status"] == "failed"
+        assert jobs.read_job(alive["id"])["status"] == "running"
+
+    def test_nothing_to_settle_is_zero(self):
+        record = _make()
+        jobs.update_job(record["id"], status="completed", completed_at=time.time())
+        assert jobs.sweep_orphans() == 0
+
+
+class TestLaunchLock:
+    def test_is_exclusive_across_processes(self):
+        # A threading.Lock cannot do this job: every Claude Code session runs
+        # its own server process against one job store on disk, so the two
+        # launches most likely to race are in different processes.
+        import subprocess
+        import textwrap
+
+        holder = subprocess.Popen(
+            [sys.executable, "-c", textwrap.dedent(f"""
+                import sys, time
+                sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})
+                import jobs
+                with jobs.launch_lock():
+                    print("held", flush=True)
+                    time.sleep(3)
+            """)],
+            stdout=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "CODEX_STATE_DIR": str(jobs.jobs_dir().parent)},
+        )
+        try:
+            assert holder.stdout.readline().strip() == "held"
+            with pytest.raises(TimeoutError):
+                with jobs.launch_lock(timeout=0.5):
+                    pass
+        finally:
+            holder.kill()
+            holder.wait()
+
+    def test_is_reentrant_across_sequential_calls(self):
+        with jobs.launch_lock():
+            pass
+        with jobs.launch_lock(timeout=1.0):
+            pass

@@ -157,14 +157,6 @@ def catalog_source() -> str:
     return _last_source or "unknown"
 
 
-def resolve_effort(model: str, effort: str, codex_home: str | None = None) -> str:
-    """Return the effort to use, falling back to the model's default if unset."""
-    if effort:
-        return effort
-    entry = get_catalog(codex_home).get(model)
-    return entry["default_effort"] if entry else "medium"
-
-
 def validate(model: str, effort: str, codex_home: str | None = None) -> str | None:
     """Validate a model/effort pair. Returns an error message, or None if valid.
 

@@ -190,20 +190,6 @@ class TestValidate:
         assert models.validate("gpt-5.6-terra", "") is None
 
 
-class TestResolveEffort:
-    def test_explicit_effort_wins(self, monkeypatch):
-        _stub_codex(monkeypatch, json.dumps(SAMPLE))
-        assert models.resolve_effort("gpt-5.6-terra", "max") == "max"
-
-    def test_falls_back_to_model_default(self, monkeypatch):
-        _stub_codex(monkeypatch, json.dumps(SAMPLE))
-        assert models.resolve_effort("gpt-5.6-terra", "") == "medium"
-
-    def test_unknown_model_defaults_to_medium(self, monkeypatch):
-        _stub_codex(monkeypatch, json.dumps(SAMPLE))
-        assert models.resolve_effort("gpt-9", "") == "medium"
-
-
 class TestDescribe:
     def test_shape(self, monkeypatch):
         _stub_codex(monkeypatch, json.dumps(SAMPLE))

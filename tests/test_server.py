@@ -6,6 +6,7 @@ and response shape, not real Codex runs.
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import jobs
 import server as server_module
+import verify
 from server import (
     codex_cancel,
     codex_delegate,
@@ -43,7 +45,17 @@ def isolated(tmp_path, monkeypatch):
 
 @pytest.fixture
 def project(tmp_path):
+    """A real git repository — what a delegation target normally is."""
     path = tmp_path / "proj"
+    path.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    return str(path)
+
+
+@pytest.fixture
+def plain_dir(tmp_path):
+    """An ordinary unversioned directory, e.g. a notes folder."""
+    path = tmp_path / "notes"
     path.mkdir()
     return str(path)
 
@@ -331,7 +343,7 @@ class TestCancel:
         jobs.update_job(started["job_id"], status="running", worker_pid=os.getpid())
         _call(codex_cancel, job_id=started["job_id"])
         assert killed == [os.getpid()]
-        assert jobs.read_job(started["job_id"])["cancel_requested"] is True
+        assert jobs.is_cancel_requested(started["job_id"])
 
     def test_cancel_of_dead_worker_reports_settled_state(self, project, monkeypatch):
         killed = []
@@ -380,3 +392,161 @@ class TestModelsTool:
         assert "gpt-5.6-terra" in result["models"]
         assert result["configured_default"]["model"] == "gpt-5.6-terra"
         assert "gpt-5.3-codex" in result["deprecated"]
+
+
+class TestErrorClassification:
+    def test_error_type_reaches_the_caller(self, project):
+        # The worker records why a job failed, but _summarize used to omit the
+        # field — so a caller could not tell a quota wall from a bad slug
+        # without pattern-matching prose, and the documented response to each
+        # is different. Every read path must carry it.
+        started = _call(codex_delegate, task="do x", project_dir=project)
+        jobs.update_job(
+            started["job_id"],
+            status="failed",
+            phase="failed",
+            error="Codex quota exhausted. Wait and retry...",
+            error_type="rate_limit",
+            completed_at=1.0,
+            worker_pid=None,
+        )
+        for tool in (codex_status, codex_result):
+            payload = _call(tool, job_id=started["job_id"])
+            assert payload["error_type"] == "rate_limit", tool.__name__
+
+    def test_error_type_is_absent_on_a_healthy_job(self, project):
+        started = _call(codex_delegate, task="do x", project_dir=project)
+        assert _call(codex_status, job_id=started["job_id"])["error_type"] is None
+
+
+class TestVerifyTimeout:
+    def test_default_is_recorded_so_the_worker_can_read_it(self, project):
+        # Regression: worker.run read verify_timeout from the request, but no
+        # tool ever wrote it — so the knob was unreachable and every
+        # verify_command was pinned to 900s, a fifth of the job timeout.
+        started = _call(
+            codex_delegate, task="do x", project_dir=project,
+            verify_command="pytest -q",
+        )
+        record = jobs.read_job(started["job_id"])
+        assert record["request"]["verify_timeout"] == verify.DEFAULT_VERIFY_TIMEOUT
+
+    def test_caller_value_reaches_the_request(self, project):
+        started = _call(
+            codex_delegate, task="do x", project_dir=project,
+            verify_command="pytest -q", verify_timeout=3600,
+        )
+        record = jobs.read_job(started["job_id"])
+        assert record["request"]["verify_timeout"] == 3600
+
+    def test_negative_is_rejected(self, project):
+        result = _call(
+            codex_delegate, task="do x", project_dir=project,
+            verify_command="pytest -q", verify_timeout=-1,
+        )
+        assert result["error"] == "invalid_request"
+
+    @pytest.mark.parametrize("tool,extra", [
+        ("codex_review_and_fix", {}),
+        ("codex_fix", {"findings": "P1: fix the thing"}),
+    ])
+    def test_exposed_on_every_tool_that_takes_a_verify_command(self, project, tool, extra):
+        fn = getattr(server_module, tool)
+        started = _call(
+            fn, project_dir=project, verify_command="pytest -q",
+            verify_timeout=1234, **extra,
+        )
+        record = jobs.read_job(started["job_id"])
+        assert record["request"]["verify_timeout"] == 1234
+
+
+class TestGitRequiredKinds:
+    def test_review_outside_a_repo_is_refused(self, plain_dir):
+        # Both review kinds build their prompt around `git diff <base>...HEAD`.
+        # Outside a repo that command fails, so codex has no diff to read.
+        result = _call(codex_review, project_dir=plain_dir)
+        assert result["error"] == "not_a_repo"
+        assert "codex_delegate" in result["message"]
+
+    def test_review_and_fix_outside_a_repo_is_refused(self, plain_dir):
+        # The sharp one: with no diff to justify them, it would still edit
+        # unversioned files under workspace-write, unrecoverably.
+        result = _call(server_module.codex_review_and_fix, project_dir=plain_dir)
+        assert result["error"] == "not_a_repo"
+        assert jobs.list_jobs() == []
+
+    def test_delegate_outside_a_repo_still_works(self, plain_dir):
+        # The case --skip-git-repo-check exists for: writing and research in an
+        # ordinary directory. Refusing this would remove the point of the flag.
+        result = _call(
+            codex_delegate, task="draft the note", project_dir=plain_dir, write=True
+        )
+        assert result["status"] == "started"
+
+    def test_fix_outside_a_repo_still_works(self, plain_dir):
+        result = _call(
+            server_module.codex_fix, project_dir=plain_dir, findings="P1: typo"
+        )
+        assert result["status"] == "started"
+
+    def test_review_inside_a_repo_is_allowed(self, project):
+        assert _call(codex_review, project_dir=project)["status"] == "started"
+
+    def test_review_from_a_subdirectory_of_a_repo_is_allowed(self, project):
+        sub = Path(project) / "src"
+        sub.mkdir()
+        assert _call(codex_review, project_dir=str(sub))["status"] == "started"
+
+
+class TestUnsafeProjectDir:
+    def test_write_at_home_is_refused(self, tmp_path, monkeypatch):
+        # The realistic accident: /Users/brian instead of
+        # /Users/brian/Documents/second-brain. workspace-write scopes codex to
+        # everything below project_dir, so this is the whole home directory.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = _call(
+            codex_delegate, task="tidy my notes",
+            project_dir=str(tmp_path), write=True,
+        )
+        assert result["error"] == "unsafe_project_dir"
+        assert jobs.list_jobs() == []
+
+    def test_write_at_filesystem_root_is_refused(self):
+        result = _call(codex_delegate, task="do x", project_dir="/", write=True)
+        assert result["error"] == "unsafe_project_dir"
+
+    def test_denied_roots_are_matched_through_symlinks(self):
+        # /tmp is a symlink to /private/tmp on macOS; comparing raw strings
+        # would let the alias straight through.
+        result = _call(codex_delegate, task="do x", project_dir="/tmp", write=True)
+        assert result["error"] == "unsafe_project_dir"
+
+    def test_read_only_at_home_is_allowed(self, tmp_path, monkeypatch):
+        # Nothing to destroy, and the guard is about blast radius. A read-only
+        # run here is unwise, not dangerous — a different conversation.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = _call(codex_delegate, task="what is here", project_dir=str(tmp_path))
+        assert result["status"] == "started"
+
+    def test_write_below_home_is_unaffected(self, tmp_path, monkeypatch):
+        # Membership is by equality, not containment: every real project lives
+        # inside one of these roots and must stay unaffected.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        notes = tmp_path / "Documents" / "second-brain"
+        notes.mkdir(parents=True)
+        result = _call(
+            codex_delegate, task="draft the note",
+            project_dir=str(notes), write=True,
+        )
+        assert result["status"] == "started"
+
+    def test_review_and_fix_at_home_is_refused_even_if_home_is_a_repo(
+        self, tmp_path, monkeypatch
+    ):
+        # Versioned dotfiles make ~ a git repo, so the not_a_repo check would
+        # pass it. Most of ~ is still untracked, so the blast radius argument
+        # is unchanged — the two guards are deliberately independent.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        result = _call(codex_review_and_fix, project_dir=str(tmp_path))
+        assert result["error"] == "unsafe_project_dir"

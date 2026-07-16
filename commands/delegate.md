@@ -1,7 +1,7 @@
 ---
 description: Delegate a task to Codex as a background agent — engineering, research, or writing
 argument-hint: "<task> [--write] [--model sol|terra|luna] [--effort low|medium|high|xhigh|max|ultra] [--verify <cmd>] [--wait]"
-allowed-tools: mcp__codex-delegate__codex_delegate, mcp__codex-delegate__codex_status, mcp__codex-delegate__codex_result, mcp__codex-delegate__codex_models, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*)
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_delegate, mcp__plugin_codex-delegate_codex-delegate__codex_status, mcp__plugin_codex-delegate_codex-delegate__codex_result, mcp__plugin_codex-delegate_codex-delegate__codex_models, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*)
 ---
 
 # Delegate to Codex

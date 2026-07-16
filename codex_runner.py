@@ -60,14 +60,9 @@ def _build_env() -> dict:
     return env
 
 
-def _classify_failure(stderr: str, exit_code: int) -> None:
-    """Raise a typed error for a known failure pattern.
-
-    Only called when codex exited non-zero. stderr carries unrelated noise on
-    successful runs too (MCP servers in the user's config log auth errors
-    there), so pattern-matching it unconditionally would produce false alarms.
-    """
-    lowered = stderr.lower()
+def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
+    """Return the (error class, message) `text` describes, or None for neither."""
+    lowered = text.lower()
 
     # Match 429 only in an HTTP-status context, not as a substring of token
     # counts, session ids, or line numbers.
@@ -90,34 +85,71 @@ def _classify_failure(stderr: str, exit_code: int) -> None:
         match = re.search(r"resets?[_ ]at[\"']?\s*[:=]\s*[\"']?([^\"',}\s]+)", lowered)
         if match:
             reset_hint = f" Quota resets at {match.group(1)}."
-        raise CodexRateLimitError(
+        return CodexRateLimitError, (
             ("Codex quota exhausted." if exhausted else "Codex rate limited.")
             + reset_hint
             + " Wait and retry, or delegate to a cheaper model "
               "(e.g. gpt-5.6-luna) or a lower effort."
         )
 
-    is_auth_error = (
-        re.search(r"(?:http|status|code)\s+401\b|401\s+unauthorized", lowered) is not None
-        or "unauthorized" in lowered
-        or "authentication failed" in lowered
-        or "please login" in lowered
-        or "please log in" in lowered
-        or "codex login" in lowered
-    )
+    # Anchored to an HTTP status or to codex's own remediation hint, rather
+    # than the bare "unauthorized" / "authentication failed" / "please login"
+    # substrings this used to accept — those fire on any stderr that merely
+    # mentions the word, which is most of them.
+    is_auth_error = re.search(
+        r"(?:http|status|code)\s+401\b|401\s+unauthorized|\bcodex\s+login\b",
+        lowered,
+    ) is not None
     if is_auth_error:
-        raise CodexAuthError(
+        return CodexAuthError, (
             "Codex CLI authentication failed. Your session may have expired.\n"
             "Fix: run `codex login` to re-authenticate with your ChatGPT account."
         )
 
     if "not supported when using codex with a chatgpt account" in lowered:
-        raise CodexError(
-            f"Codex rejected the model. This usually means the slug is "
-            f"deprecated or unavailable on your plan.\n{stderr.strip()[:500]}"
+        return CodexError, (
+            "Codex rejected the model. This usually means the slug is "
+            "deprecated or unavailable on your plan."
         )
 
-    raise CodexError(f"Codex CLI failed (exit {exit_code}): {stderr.strip()[:2000]}")
+    return None
+
+
+def _classify_failure(stderr: str, turn_error: str, exit_code: int) -> None:
+    """Raise a typed error for a known failure pattern.
+
+    Only called when codex exited non-zero. Two rules, both learned the hard
+    way:
+
+    turn_error is read first because it is codex's own structured account of
+    why the turn died, while stderr is a channel we merely share: the MCP
+    servers in the user's codex config log their own failures into it, on
+    successful runs too. Preferring stderr — as `stderr or turn_error` did,
+    and stderr is almost never empty — collected the model's real reason and
+    then discarded it in favour of somebody else's noise.
+
+    The raw text is then appended to whatever we raise. No pattern can be
+    trusted to attribute a line of a shared stream to codex rather than to a
+    bystander: an MCP server logging `HTTP 401 Unauthorized` at startup reads
+    exactly like an expired session. So a classification is a hint about what
+    to try, never a replacement for the evidence — the failure we hid used to
+    be the one the user actually needed to see.
+    """
+    detail = " | ".join(
+        part.strip() for part in (turn_error, stderr) if part and part.strip()
+    )
+
+    for text in (turn_error, stderr):
+        if not text or not text.strip():
+            continue
+        matched = _match_failure(text)
+        if matched is not None:
+            error_class, message = matched
+            raise error_class(
+                f"{message}\n\nCodex reported (exit {exit_code}): {detail[:1500]}"
+            )
+
+    raise CodexError(f"Codex CLI failed (exit {exit_code}): {detail[:2000]}")
 
 
 def build_command(
@@ -320,7 +352,7 @@ def run_codex(
         }
 
     if proc.returncode != 0:
-        _classify_failure(stderr or state["turn_error"] or "", proc.returncode)
+        _classify_failure(stderr, state["turn_error"] or "", proc.returncode)
 
     return {
         "thread_id": state["thread_id"],

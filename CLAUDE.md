@@ -32,8 +32,10 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`verify.py`** — Git-grounded verification and the `verify_command` runner.
 - **`config.py`** — Live-reloaded config via `classproperty`, plus
   `subprocess_env()`.
-- **`.claude-plugin/`, `commands/`, `skills/`, `.mcp.json`** — plugin packaging.
-- **`tests/`** — 148 pytest tests. No Codex calls; the CLI is stubbed.
+- **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
+  server is declared inline in `plugin.json`; a root `.mcp.json` would be
+  loaded as *project* config, where `${CLAUDE_PLUGIN_ROOT}` does not expand.
+- **`tests/`** — 281 pytest tests. No Codex calls; the CLI is stubbed.
 
 ## Development Commands
 

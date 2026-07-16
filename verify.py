@@ -15,6 +15,12 @@ from pathlib import Path
 
 from config import subprocess_env
 
+# Ceiling for a caller's verify_command when they do not set one. Deliberately
+# well under CODEX_TIMEOUT's 4500s: this runs a test suite, not an agent. Any
+# caller whose suite needs longer passes verify_timeout — before that existed,
+# this was an unreachable default that silently failed slow suites.
+DEFAULT_VERIFY_TIMEOUT = 900
+
 
 def _git(args: list[str], cwd: str, timeout: int = 60) -> tuple[bool, str]:
     """Run a git command. Returns (ok, raw stdout). Never uses a shell.
@@ -38,35 +44,74 @@ def _git(args: list[str], cwd: str, timeout: int = 60) -> tuple[bool, str]:
     return result.returncode == 0, result.stdout
 
 
+# Untracked files are listed individually rather than collapsed to their
+# directory. Without this git prints one "?? drafts/" entry no matter what
+# happens inside, so a task that created or rewrote files under an
+# already-untracked directory registers as no change at all.
+_STATUS_ARGS = ["status", "--porcelain", "-z", "--untracked-files=all"]
+
+
+def _split_z(text: str) -> list[str]:
+    """Fields of a NUL-separated git output, minus the trailing empty."""
+    return [field for field in text.split("\0") if field]
+
+
 def _parse_porcelain(text: str) -> dict[str, str]:
-    """Parse `git status --porcelain` into {path: status}."""
+    """Parse `git status --porcelain -z` into {path: status}.
+
+    -z is load-bearing, not a detail. Without it git C-quotes any path that is
+    not plain ASCII — `café.py` prints as `"caf\\303\\251.py"` — and the escaped
+    name matches nothing on disk, so the content hash reads `<absent>` both
+    before and after and a real edit becomes invisible. -z emits raw,
+    NUL-terminated paths that are never quoted.
+
+    Rename and copy entries carry their source path as an extra field, which
+    must be consumed or it parses as a bogus entry of its own.
+    """
+    fields = _split_z(text)
     entries = {}
-    for line in text.splitlines():
-        if len(line) < 4:
+    index = 0
+    while index < len(fields):
+        field = fields[index]
+        index += 1
+        if len(field) < 4:
             continue
-        status, path = line[:2], line[3:]
-        # Renames/copies render as "old -> new"; the new path is what exists now.
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-        entries[path.strip().strip('"')] = status
+        status, path = field[:2], field[3:]
+        if status[0] in "RC" or status[1] in "RC":
+            # Source path follows; the destination is what exists now.
+            index += 1
+        entries[path] = status
     return entries
 
 
-def _numstat(project_dir: str) -> dict[str, str]:
-    """Per-file {path: "added,deleted"} for tracked changes against HEAD."""
-    ok, out = _git(["diff", "HEAD", "--numstat"], project_dir)
+def _numstat(cwd: str) -> dict[str, str]:
+    """Per-file {path: "added,deleted"} for tracked changes against HEAD.
+
+    -z for the same reason as _parse_porcelain. A rename renders as an empty
+    path field followed by the source and destination as two further fields.
+    """
+    ok, out = _git(["diff", "HEAD", "--numstat", "-z"], cwd)
     if not ok:
         return {}
+    fields = _split_z(out)
     stats = {}
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 3 and parts[2].strip():
-            stats[parts[2].strip()] = f"{parts[0]},{parts[1]}"
+    index = 0
+    while index < len(fields):
+        parts = fields[index].split("\t")
+        index += 1
+        if len(parts) < 3:
+            continue
+        added, deleted, path = parts[0], parts[1], parts[2]
+        if not path:
+            path = fields[index + 1] if index + 1 < len(fields) else ""
+            index += 2
+        if path:
+            stats[path] = f"{added},{deleted}"
     return stats
 
 
-def _hash_files(project_dir: str, paths) -> dict[str, str]:
-    """Content hashes for the given paths.
+def _hash_files(root: str, paths) -> dict[str, str]:
+    """Content hashes for the given paths, resolved against the repo root.
 
     Status and line counts both go blind on a file that was *already* dirty
     before the task: editing it again leaves porcelain at " M", and a
@@ -75,22 +120,32 @@ def _hash_files(project_dir: str, paths) -> dict[str, str]:
     it did not do" warning. Content hashes are the only signal that always
     moves when the bytes move.
 
+    `root` must be the repository root, never the caller's project_dir: git
+    prints every path relative to the root regardless of the directory it ran
+    in, so joining onto a subdirectory yields /repo/src/src/foo.py and every
+    hash silently reads <absent>.
+
     Only baseline-dirty and untracked paths are hashed, never the whole repo,
     so this stays cheap: a clean file cannot change without git noticing.
     """
     hashes = {}
-    root = Path(project_dir)
+    base = Path(root)
     for path in paths:
-        target = root / path
+        target = base / path
         try:
             if target.is_file():
                 hashes[path] = hashlib.sha256(target.read_bytes()).hexdigest()
             else:
-                # Directory entry (porcelain lists untracked dirs) or deleted.
                 hashes[path] = "<absent>"
         except OSError:
             hashes[path] = "<unreadable>"
     return hashes
+
+
+def repo_root(project_dir: str) -> str:
+    """Repository root containing project_dir, or "" if it is not in a work tree."""
+    ok, out = _git(["rev-parse", "--show-toplevel"], project_dir)
+    return out.strip() if ok else ""
 
 
 def snapshot(project_dir: str) -> dict:
@@ -99,20 +154,24 @@ def snapshot(project_dir: str) -> dict:
     if not is_repo:
         return {"is_repo": False}
 
-    _, head = _git(["rev-parse", "HEAD"], project_dir)
-    ok, porcelain = _git(["status", "--porcelain"], project_dir)
+    # Nothing requires project_dir to be the repository root, and every path
+    # git reports is root-relative. Resolve the root once and anchor to it.
+    root = repo_root(project_dir) or project_dir
+    _, head = _git(["rev-parse", "HEAD"], root)
+    ok, porcelain = _git(_STATUS_ARGS, root)
     entries = _parse_porcelain(porcelain) if ok else {}
     return {
         "is_repo": True,
+        "root": root,
         "head": head.strip(),
         "entries": entries,
-        "numstat": _numstat(project_dir),
-        "hashes": _hash_files(project_dir, entries.keys()),
+        "numstat": _numstat(root),
+        "hashes": _hash_files(root, entries.keys()),
         "git_ok": ok,
     }
 
 
-def _changed_files(project_dir: str, before: dict, after_entries: dict,
+def _changed_files(root: str, before: dict, after_entries: dict,
                    after_numstat: dict, head_before: str,
                    head_after: str) -> list[str]:
     """Files the task actually touched, per git.
@@ -124,6 +183,8 @@ def _changed_files(project_dir: str, before: dict, after_entries: dict,
         that were already untracked (which never appear in numstat at all)
       - HEAD diff: work the task committed itself, which would otherwise leave
         a clean tree and look like nothing happened
+
+    Paths are root-relative throughout, so `root` is the repository root.
     """
     before_entries = before.get("entries", {})
     changed = {
@@ -141,7 +202,7 @@ def _changed_files(project_dir: str, before: dict, after_entries: dict,
 
     before_hashes = before.get("hashes", {})
     if before_hashes:
-        after_hashes = _hash_files(project_dir, before_hashes.keys())
+        after_hashes = _hash_files(root, before_hashes.keys())
         changed.update(
             path
             for path in before_hashes
@@ -150,15 +211,16 @@ def _changed_files(project_dir: str, before: dict, after_entries: dict,
 
     if head_before and head_after and head_before != head_after:
         ok, names = _git(
-            ["diff", "--name-only", f"{head_before}..{head_after}"], project_dir
+            ["diff", "--name-only", "-z", f"{head_before}..{head_after}"], root
         )
         if ok:
-            changed.update(n for n in names.splitlines() if n.strip())
+            changed.update(_split_z(names))
 
     return sorted(changed)
 
 
-def run_verify_command(command: str, project_dir: str, timeout: int = 900) -> dict:
+def run_verify_command(command: str, project_dir: str,
+                       timeout: int = DEFAULT_VERIFY_TIMEOUT) -> dict:
     """Run the caller's verification command (tests, lint, build).
 
     Uses a shell so ordinary command lines (`pytest -q && ruff check`) work.
@@ -215,7 +277,7 @@ def verify(
     before: dict,
     write: bool,
     verify_command: str = "",
-    verify_timeout: int = 900,
+    verify_timeout: int = DEFAULT_VERIFY_TIMEOUT,
 ) -> dict:
     """Compare post-task repository state against the pre-task snapshot.
 
@@ -227,18 +289,29 @@ def verify(
     checks = []
 
     if not before.get("is_repo"):
+        # A read-only task in an unversioned directory is constrained by the
+        # sandbox, so "could not check" is a fair skip. A write task is not:
+        # nothing observed what it did, and git cannot undo any of it either.
+        # Reporting verified:true there would be a claim we never checked.
         checks.append({
             "name": "git_tracking",
-            "status": "skip",
-            "detail": "Not a git repository — file changes could not be verified.",
+            "status": "fail" if write else "skip",
+            "detail": (
+                "Not a git repository, so the files this task changed could "
+                "not be verified — and its edits are not recoverable with git. "
+                "Treat its file claims as unchecked."
+                if write
+                else "Not a git repository — file changes could not be verified."
+            ),
         })
         report = {"git": {"is_repo": False}, "checks": checks}
     else:
-        _, head_after_raw = _git(["rev-parse", "HEAD"], project_dir)
+        root = before.get("root") or project_dir
+        _, head_after_raw = _git(["rev-parse", "HEAD"], root)
         head_after = head_after_raw.strip()
-        ok, porcelain = _git(["status", "--porcelain"], project_dir)
+        ok, porcelain = _git(_STATUS_ARGS, root)
         after_entries = _parse_porcelain(porcelain) if ok else {}
-        after_numstat = _numstat(project_dir)
+        after_numstat = _numstat(root)
         head_before = before.get("head", "")
 
         # "Could not inspect" must never silently become "nothing changed" —
@@ -254,7 +327,7 @@ def verify(
             })
 
         files = _changed_files(
-            project_dir, before, after_entries, after_numstat,
+            root, before, after_entries, after_numstat,
             head_before, head_after
         )
         committed = bool(head_before and head_after and head_before != head_after)
@@ -262,10 +335,10 @@ def verify(
         diff_stat = ""
         if committed:
             _, diff_stat = _git(
-                ["diff", "--stat", f"{head_before}..{head_after}"], project_dir
+                ["diff", "--stat", f"{head_before}..{head_after}"], root
             )
         elif files:
-            _, diff_stat = _git(["diff", "--stat"], project_dir)
+            _, diff_stat = _git(["diff", "--stat"], root)
         diff_stat = diff_stat.strip()
 
         report = {

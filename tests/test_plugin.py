@@ -44,6 +44,19 @@ def _mcp_server_name() -> str:
     return names[0]
 
 
+def _mcp_tool_prefix() -> str:
+    """The namespace Claude Code gives the tools of a plugin-provided server.
+
+    Not `mcp__<server>__` — that is the shape for a user- or project-scoped
+    server. One declared in plugin.json is namespaced by plugin *and* server
+    key: `mcp__plugin_<plugin>_<server>__<tool>`. Deriving it from the server
+    key alone is what put a prefix in every allowed-tools list that matches no
+    live tool, and a test deriving it the same wrong way found nothing to
+    check and passed — confirming the bug rather than catching it.
+    """
+    return f"mcp__plugin_{_plugin_manifest()['name']}_{_mcp_server_name()}__"
+
+
 class TestManifests:
     def test_plugin_json_is_valid(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
@@ -117,13 +130,29 @@ class TestCommandFrontmatter:
 
     def test_mcp_tools_referenced_actually_exist(self, path):
         allowed = _frontmatter(path).get("allowed-tools", "")
-        prefix = f"mcp__{_mcp_server_name()}__"
+        prefix = _mcp_tool_prefix()
         referenced = {
             tool.strip().removeprefix(prefix)
             for tool in re.findall(rf"{re.escape(prefix)}\w+", allowed)
         }
         unknown = referenced - _tool_names()
         assert not unknown, f"{path.name} references non-existent tools: {unknown}"
+
+    def test_mcp_tools_use_the_plugin_scoped_prefix(self, path):
+        # Checking the suffix is not enough on its own: a wrong prefix matches
+        # nothing, so the test above sees an empty set and passes while the
+        # allow-list authorizes zero tools and every command prompts anyway.
+        allowed = _frontmatter(path).get("allowed-tools", "")
+        prefix = _mcp_tool_prefix()
+        wrong = [
+            tool
+            for tool in re.findall(r"mcp__[\w-]+__\w+", allowed)
+            if not tool.startswith(prefix)
+        ]
+        assert not wrong, (
+            f"{path.name} names MCP tools that no live tool matches: {wrong}. "
+            f"Plugin-provided servers are namespaced '{prefix}<tool>'."
+        )
 
 
 class TestSkill:

@@ -1,7 +1,7 @@
 ---
 description: Cross-model code review of the current branch by Codex (optionally auto-fixing clear findings)
 argument-hint: "[base-branch] [--fix] [--focus bugs|security|performance|all] [--model sol|terra|luna] [--effort xhigh|max|ultra]"
-allowed-tools: mcp__codex-delegate__codex_review, mcp__codex-delegate__codex_review_and_fix, mcp__codex-delegate__codex_status, mcp__codex-delegate__codex_result, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git branch:*)
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_review, mcp__plugin_codex-delegate_codex-delegate__codex_review_and_fix, mcp__plugin_codex-delegate_codex-delegate__codex_status, mcp__plugin_codex-delegate_codex-delegate__codex_result, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git branch:*)
 ---
 
 # Codex Cross-Model Review

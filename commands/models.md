@@ -1,6 +1,6 @@
 ---
 description: List Codex models available on your account, with valid reasoning efforts
-allowed-tools: mcp__codex-delegate__codex_models
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_models
 ---
 
 # Codex Models

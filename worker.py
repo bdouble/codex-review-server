@@ -19,7 +19,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jobs
 import verify
 from codex_runner import (
+    CodexAuthError,
     CodexError,
+    CodexNotFoundError,
+    CodexRateLimitError,
     build_delegate_prompt,
     build_fix_prompt,
     build_follow_up_prompt,
@@ -28,6 +31,24 @@ from codex_runner import (
     run_codex,
 )
 from config import Config
+
+# Stable slugs for the job record, not the exception class name: this is the
+# field callers branch on to decide whether to drop to a cheaper model, tell
+# the user to re-authenticate, or give up (see skills/codex-delegation).
+# A class name would change under an internal rename and take that with it.
+_ERROR_TYPES = (
+    (CodexRateLimitError, "rate_limit"),
+    (CodexAuthError, "auth_error"),
+    (CodexNotFoundError, "codex_not_found"),
+    (CodexError, "codex_error"),
+)
+
+
+def _error_type(exc: BaseException) -> str:
+    for error_class, slug in _ERROR_TYPES:
+        if isinstance(exc, error_class):
+            return slug
+    return "worker_error"
 
 
 def _build_prompt(request: dict) -> str:
@@ -171,7 +192,7 @@ def run(job_id: str) -> None:
             status=status,
             phase=status,
             error=str(exc),
-            error_type=type(exc).__name__,
+            error_type=_error_type(exc),
             completed_at=time.time(),
             worker_pid=None,
         )
@@ -183,7 +204,7 @@ def run(job_id: str) -> None:
             status="failed",
             phase="failed",
             error=f"Worker error: {exc}",
-            error_type=type(exc).__name__,
+            error_type=_error_type(exc),
             completed_at=time.time(),
             worker_pid=None,
         )
@@ -197,7 +218,10 @@ def run(job_id: str) -> None:
             before=before,
             write=request.get("write", False),
             verify_command=request.get("verify_command", ""),
-            verify_timeout=request.get("verify_timeout", 900),
+            # _launch always writes this now; the fallback covers job
+            # records created before it was wired through.
+            verify_timeout=request.get(
+                "verify_timeout") or verify.DEFAULT_VERIFY_TIMEOUT,
         )
     except Exception as exc:  # noqa: BLE001
         verification = {

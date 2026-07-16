@@ -7,6 +7,7 @@ reconcile: a job marked `running` whose worker PID is gone is resolved to a
 terminal state at read time. That covers worker crashes, kill -9, and reboots.
 """
 
+import fcntl
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import secrets
 import signal
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from config import Config
@@ -99,17 +101,23 @@ def cancel_path(job_id: str) -> Path:
 
 
 def request_cancel(job_id: str) -> None:
-    """Mark a job cancelled using a sentinel file.
+    """Mark a job cancelled using a sentinel file, and only that.
 
-    Deliberately not just a field on the record. The worker rewrites the record
-    on every phase change via read-modify-write, so a `cancel_requested` field
-    set concurrently can be read-then-clobbered — after which the job reports
-    "failed: worker exited without recording a result" instead of "cancelled".
-    A separate file cannot be lost that way. The field is still set for
-    visibility, but this file is what the code trusts.
+    Deliberately not a field on the record. The worker rewrites the record on
+    every phase change via read-modify-write, so a `cancel_requested` field set
+    concurrently can be read-then-clobbered. A separate file cannot be lost
+    that way.
+
+    Writing the field *as well* is not a harmless extra: update_job is itself a
+    read-modify-write from a different process, so a cancel landing as the job
+    finishes reads the record while it still says `running`, then writes that
+    stale copy back over the worker's terminal record — destroying the output,
+    usage and verification of a run that had already completed, and leaving
+    reconcile to settle it as `cancelled` with nothing to show. The sentinel
+    alone carries the request; nothing reads the field but reconcile, which
+    keeps honouring it for records written by older versions.
     """
     cancel_path(job_id).touch()
-    update_job(job_id, cancel_requested=True)
 
 
 def is_cancel_requested(job_id: str) -> bool:
@@ -314,6 +322,8 @@ def reconcile(record: dict) -> dict:
     # which would otherwise run on orphaned indefinitely.
     reaped = reap_orphan_codex(record)
 
+    # The field is legacy: nothing writes it any more (see request_cancel), but
+    # a record created before that change can still carry it.
     if is_cancel_requested(record["id"]) or record.get("cancel_requested"):
         record["status"] = "cancelled"
         record["error"] = "Cancelled by request."
@@ -378,12 +388,25 @@ def sweep_orphans() -> int:
     for someone to happen to poll the right job. Called at server startup, the
     point where a previous session's workers are most likely to have been
     killed with their codex still running.
+
+    Counts what reconciliation actually settled, which means reading the raw
+    records rather than list_jobs(): list_jobs reconciles on the way out, so by
+    the time it returns, every job this reports on already looks terminal and
+    the only records left to count are the healthy active ones — the exact
+    inverse of the number.
     """
     settled = 0
-    for record in list_jobs():
-        if record.get("status") in TERMINAL_STATUSES and record.get("completed_at"):
+    for path in jobs_dir().glob("*.json"):
+        if path.name.endswith(".schema.json"):
             continue
-        settled += 1
+        try:
+            record = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if record.get("status") not in ACTIVE_STATUSES:
+            continue
+        if reconcile(record).get("status") in TERMINAL_STATUSES:
+            settled += 1
     return settled
 
 
@@ -392,6 +415,85 @@ def canonical_dir(path: str) -> str:
     if not path:
         return ""
     return os.path.realpath(os.path.expanduser(path))
+
+
+@contextmanager
+def launch_lock(timeout: float = 30.0):
+    """Serialize the conflict-check/create pair across every server process.
+
+    The check-and-claim in server._launch has to be atomic or two launches both
+    see a free tree and both start. A threading.Lock cannot do it: the job store
+    is one directory on disk, and the plugin gives every Claude Code session its
+    own server process — so the two launches most likely to race are in
+    different processes, where an in-process lock guards nothing. flock is held
+    by the kernel on behalf of the process, so it spans them, and it is released
+    automatically if that process dies, which leaves no stale lock to clear.
+
+    Bounded rather than blocking forever: the lock is only ever held across a
+    check and a small write, so waiting this long means a holder wedged, and
+    failing the call beats hanging the client.
+    """
+    handle = open(jobs_dir() / ".launch.lock", "w")
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Another codex job launch has held the store lock for "
+                        f"over {timeout:.0f}s."
+                    )
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def _git_toplevel(path: str) -> str:
+    """Repository root containing `path`, or "" if it is not in a work tree."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    if result.returncode != 0 or not result.stdout.strip():
+        return ""
+    return os.path.realpath(result.stdout.strip())
+
+
+def tree_key(path: str) -> str:
+    """Identity of the working tree a job operates on.
+
+    Jobs clash over a *tree*, not over the string they were handed. Nothing
+    requires project_dir to be a repository root, so comparing canonical paths
+    alone lets /repo and /repo/src both claim one working tree and start
+    together — the interleaved-edit corruption this lock exists to prevent,
+    with no repo_busy shown and no race needed. Git's own root is the honest
+    identity; outside a repository the directory itself is the best available.
+    """
+    canonical = canonical_dir(path)
+    if not canonical:
+        return ""
+    return _git_toplevel(canonical) or canonical
+
+
+def _nested(first: str, second: str) -> bool:
+    """Is either directory inside the other?"""
+    for parent, child in ((first, second), (second, first)):
+        if child == parent or child.startswith(parent.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 def find_conflict(project_dir: str, write: bool) -> dict | None:
@@ -414,17 +516,25 @@ def find_conflict(project_dir: str, write: bool) -> dict | None:
     edit stale code) or untracked files like .env and .venv (so verify_command
     would fail). Refusing the unsafe combination is the honest trade.
 
+    Two jobs share a tree when git resolves them to the same repository root,
+    or — outside a repository, where there is no root to compare — when one
+    directory sits inside the other and its files are therefore reachable.
+
     Reconciliation runs during list_jobs(), so a crashed job's stale record
     cannot hold the lock.
     """
     target = canonical_dir(project_dir)
     if not target:
         return None
+    target_key = tree_key(target)
 
     for record in list_jobs():
         if record.get("status") not in ACTIVE_STATUSES:
             continue
-        if canonical_dir(record.get("project_dir") or "") != target:
+        other_dir = canonical_dir(record.get("project_dir") or "")
+        if not other_dir:
+            continue
+        if tree_key(other_dir) != target_key and not _nested(target, other_dir):
             continue
         other_writes = bool((record.get("request") or {}).get("write"))
         if write or other_writes:
@@ -465,7 +575,6 @@ def create_job(job_class: str, request: dict) -> dict:
         "sandbox": request.get("sandbox"),
         "thread_id": None,
         "worker_pid": None,
-        "cancel_requested": False,
         "created_at": time.time(),
         "started_at": None,
         "completed_at": None,

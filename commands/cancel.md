@@ -1,7 +1,7 @@
 ---
 description: Cancel a running Codex job and stop its process
 argument-hint: "<job-id>"
-allowed-tools: mcp__codex-delegate__codex_cancel, mcp__codex-delegate__codex_status, Bash(git status:*), Bash(git diff:*)
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_cancel, mcp__plugin_codex-delegate_codex-delegate__codex_status, Bash(git status:*), Bash(git diff:*)
 ---
 
 # Cancel a Codex Job

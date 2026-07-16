@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 import models
 
@@ -21,6 +21,14 @@ _ENV_FILE = Path(__file__).parent / ".env"
 DEFAULT_MODEL = "gpt-5.6-terra"
 DEFAULT_EFFORT = "xhigh"
 DEFAULT_TIMEOUT = "4500"
+
+# "none" was a valid reasoning level under the 5.3-era catalog and is listed as
+# one in 1.0's .env.example. No model in the current catalog offers it, so an
+# untouched legacy .env would fail validation on every single tool call and
+# leave the server unable to run anything — the opposite of the compatibility
+# the CODEX_REVIEW_* fallback exists to provide. Map it to the lowest level
+# that does exist and warn.
+LEGACY_EFFORTS = {"none": "low"}
 
 
 def subprocess_env() -> dict:
@@ -58,8 +66,36 @@ class classproperty:
         return self.func(objtype)
 
 
+# What os.environ held for each key before .env last overrode it. load_dotenv
+# only ever *adds* to os.environ, so without this a key deleted from .env keeps
+# serving its old value out of the environment until the server restarts — and
+# the whole point of re-reading the file is that an edit takes effect on the
+# next tool call. Pinned to a deprecated model, you would comment the line out,
+# see nothing change, and have no way to tell why.
+_overridden: dict[str, str | None] = {}
+
+
 def _reload_env():
-    """Re-read .env file, overriding current env vars."""
+    """Re-read .env, applying additions, edits, and removals alike."""
+    values = {
+        key: value
+        for key, value in dotenv_values(_ENV_FILE).items()
+        if value is not None
+    }
+
+    for key in list(_overridden):
+        if key not in values:
+            # Put back whatever the real environment had, so a key removed from
+            # .env falls back to it rather than to a stale value or to nothing.
+            original = _overridden.pop(key)
+            if original is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original
+
+    for key in values:
+        _overridden.setdefault(key, os.environ.get(key))
+
     load_dotenv(_ENV_FILE, override=True)
 
 
@@ -86,7 +122,11 @@ class Config:
 
     @classproperty
     def EFFORT(cls) -> str:
-        return cls._get(
+        return LEGACY_EFFORTS.get(cls._raw_effort(), cls._raw_effort())
+
+    @staticmethod
+    def _raw_effort() -> str:
+        return Config._get(
             "CODEX_EFFORT", DEFAULT_EFFORT, legacy_key="CODEX_REVIEW_REASONING"
         )
 
@@ -121,6 +161,13 @@ class Config:
     def validate(cls) -> list[str]:
         """Validate current configuration. Returns a list of warnings."""
         warnings = []
+
+        raw_effort = cls._raw_effort()
+        if raw_effort in LEGACY_EFFORTS:
+            warnings.append(
+                f"Reasoning effort '{raw_effort}' is no longer offered by any "
+                f"model; using '{LEGACY_EFFORTS[raw_effort]}'. Update your .env."
+            )
 
         error = models.validate(cls.MODEL, cls.EFFORT, cls.CODEX_HOME)
         if error:

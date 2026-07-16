@@ -99,46 +99,81 @@ class TestBuildCommand:
 class TestClassifyFailure:
     def test_rate_limit_phrase(self):
         with pytest.raises(CodexRateLimitError):
-            _classify_failure("Error: rate limit exceeded", 1)
+            _classify_failure("Error: rate limit exceeded", "", 1)
 
     def test_http_429_in_status_context(self):
         with pytest.raises(CodexRateLimitError):
-            _classify_failure("request failed with status 429", 1)
+            _classify_failure("request failed with status 429", "", 1)
 
     def test_bare_429_substring_is_not_a_rate_limit(self):
         # Regression: token counts and session ids contain "429" constantly.
         with pytest.raises(CodexError) as excinfo:
-            _classify_failure("used 4291 tokens in session 429abc", 1)
+            _classify_failure("used 4291 tokens in session 429abc", "", 1)
         assert not isinstance(excinfo.value, CodexRateLimitError)
 
     def test_quota_exhaustion_suggests_cheaper_model(self):
         with pytest.raises(CodexRateLimitError, match="gpt-5.6-luna"):
-            _classify_failure('{"error":"usage_limit_reached"}', 1)
+            _classify_failure('{"error":"usage_limit_reached"}', "", 1)
 
     def test_quota_reset_time_is_surfaced(self):
         with pytest.raises(CodexRateLimitError, match="2026-07-16"):
-            _classify_failure('usage_limit_reached resets_at: 2026-07-16', 1)
+            _classify_failure('usage_limit_reached resets_at: 2026-07-16', "", 1)
 
     def test_auth_error(self):
         with pytest.raises(CodexAuthError, match="codex login"):
-            _classify_failure("401 unauthorized", 1)
+            _classify_failure("401 unauthorized", "", 1)
 
     def test_bare_401_substring_is_not_an_auth_error(self):
         with pytest.raises(CodexError) as excinfo:
-            _classify_failure("wrote 401 lines to file", 1)
+            _classify_failure("wrote 401 lines to file", "", 1)
         assert not isinstance(excinfo.value, CodexAuthError)
+
+    def test_bare_unauthorized_word_is_not_an_auth_error(self):
+        # Regression: the user's other MCP servers log their own auth failures
+        # to our stderr, so a bare "unauthorized" fired on unrelated failures
+        # and told the user to re-run `codex login` for a bad model slug.
+        with pytest.raises(CodexError) as excinfo:
+            _classify_failure("mcp server 'notes': unauthorized", "", 1)
+        assert not isinstance(excinfo.value, CodexAuthError)
+
+    def test_turn_error_is_preferred_over_stderr_noise(self):
+        # stderr is almost never empty (other MCP servers log into it), so
+        # reading it first threw away codex's own account of the failure.
+        with pytest.raises(CodexRateLimitError):
+            _classify_failure(
+                "mcp server 'notes' failed to start",
+                '{"code":"usage_limit_reached"}',
+                1,
+            )
+
+    def test_classification_never_hides_the_raw_failure(self):
+        # No pattern can tell codex's own line from a bystander's in a shared
+        # stream, so a misread must still carry the evidence: this stderr looks
+        # like an expired session and is really a rejected model.
+        with pytest.raises(CodexAuthError, match="gpt-9-nope"):
+            _classify_failure(
+                "mcp server 'notes': HTTP 401 Unauthorized\n"
+                "ERROR: model 'gpt-9-nope' returned 400",
+                "",
+                1,
+            )
 
     def test_deprecated_model_gets_actionable_message(self):
         with pytest.raises(CodexError, match="deprecated or unavailable"):
             _classify_failure(
                 "The 'gpt-5.3-codex' model is not supported when using "
                 "Codex with a ChatGPT account.",
+                "",
                 1,
             )
 
     def test_unknown_failure_is_generic(self):
         with pytest.raises(CodexError, match="exit 3"):
-            _classify_failure("something else broke", 3)
+            _classify_failure("something else broke", "", 3)
+
+    def test_unknown_failure_surfaces_both_sources(self):
+        with pytest.raises(CodexError, match="context_length_exceeded"):
+            _classify_failure("noise", '{"code":"context_length_exceeded"}', 3)
 
 
 class TestPhaseDetection:

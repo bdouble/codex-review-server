@@ -22,6 +22,9 @@ background jobs, session resume, and verification grounded in git.
 3. If your `.env` pins `CODEX_REVIEW_MODEL=gpt-5.3-codex`, change it — that
    model is deprecated and returns HTTP 400 on every call. Deleting the line
    takes the new default.
+4. `CODEX_REVIEW_REASONING=none` is honoured as `low` and warned about at
+   startup. No model in the GPT-5.6 catalog offers a `none` level, so the value
+   1.x documented no longer exists; nothing breaks, but update the line.
 
 ### Fixed
 
@@ -117,7 +120,7 @@ branch through the server itself, then reproducing each one:
   `/codex:follow-up`, `/codex:cancel`, `/codex:models`), and a `codex-delegation`
   skill covering model choice, verification discipline, and fan-out. The
   launcher bootstraps its own virtualenv on first run.
-- **Test suite** — 148 tests, no Codex calls required.
+- **Test suite** — 281 tests, no Codex calls required.
 
 ### Added — concurrency safety and process teardown
 

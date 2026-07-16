@@ -18,7 +18,6 @@ import json
 import os
 import subprocess
 import sys
-import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +26,7 @@ from mcp.server.fastmcp import FastMCP
 
 import jobs
 import models
+import verify
 from codex_runner import CodexNotFoundError, find_codex_binary
 from config import Config
 
@@ -34,13 +34,47 @@ server = FastMCP("codex-review-server")
 
 _WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "worker.py")
 
-# Serializes the conflict-check/create pair in _launch. FastMCP runs sync tools
-# in a thread pool, so two delegate calls issued together genuinely race — and
-# that parallel fan-out is exactly the case the repo lock exists to protect.
-_launch_lock = threading.Lock()
+# Kinds whose prompt is built entirely around `git diff <base>...HEAD`.
+#
+# codex refuses to run outside a git repository by default; we pass
+# --skip-git-repo-check to lift that, deliberately, so writing and research
+# tasks can target an ordinary directory. These two are the case where lifting
+# it can only misfire: with no repo there is no diff, so codex has nothing to
+# review — and review_and_fix would go on to edit unversioned files under
+# workspace-write, with nothing to justify the edits and no way to undo them.
+_GIT_REQUIRED_KINDS = {"review", "review_and_fix"}
 
-for _warning in Config.validate():
-    print(f"[codex-review-server] WARNING: {_warning}", file=sys.stderr)
+# Directory names that are a home or system root rather than a project.
+_UNSAFE_ROOTS = (
+    "/", "~",
+    "/Users", "/home", "/root",
+    "/etc", "/usr", "/var", "/opt", "/tmp", "/bin", "/sbin",
+    "/Library", "/System", "/Applications", "/private",
+    "/mnt", "/media",
+)
+
+
+def _unsafe_write_roots() -> set[str]:
+    """Directories a write task must never be pointed *at*.
+
+    project_dir's only gate is os.path.isdir, and workspace-write scopes codex
+    to the whole tree below whatever it is handed — so `/Users/brian`, one
+    tab-completion short of `/Users/brian/Documents/second-brain`, quietly
+    grants write access to every file in the home directory, `.ssh` and browser
+    profiles included, with no diff to justify it and (outside a repo) no undo.
+
+    Not a security boundary — codex is not an adversary, and this would be a
+    poor one. It catches the realistic accident: a typo, or a path one segment
+    too short. Membership is by equality, never containment: the point is to
+    reject a root that was named directly, while every real project *inside*
+    these roots stays unaffected.
+
+    Resolved per call rather than at import: HOME is environment-dependent, and
+    realpath matters because /tmp is /private/tmp on macOS.
+    """
+    return {
+        os.path.realpath(os.path.expanduser(path)) for path in _UNSAFE_ROOTS
+    }
 
 
 def _error(error_type: str, message: str, **extra) -> str:
@@ -109,7 +143,7 @@ def _resolve_settings(model: str, effort: str) -> tuple[str, str, str | None]:
 
 
 def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
-            timeout: int, **request_fields) -> str:
+            timeout: int, verify_timeout: int = 0, **request_fields) -> str:
     """Validate, create a job, and spawn its worker."""
     try:
         find_codex_binary()
@@ -124,6 +158,24 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             "invalid_request", f"project_dir does not exist: {project_dir}"
         )
 
+    if write and jobs.canonical_dir(project_dir) in _unsafe_write_roots():
+        return _error(
+            "unsafe_project_dir",
+            f"Refusing to run a write task directly in {project_dir}. That is a "
+            f"home or system root, and workspace-write would give Codex every "
+            f"file beneath it — almost always a path one segment short of the "
+            f"project you meant. Name the directory to work in.",
+        )
+
+    if kind in _GIT_REQUIRED_KINDS and not verify.repo_root(project_dir):
+        return _error(
+            "not_a_repo",
+            f"{project_dir} is not a git repository, and {kind} reviews a "
+            f"branch diff (`git diff <base>...HEAD`) — there is nothing here "
+            f"for it to read. Point it at a repository, or use codex_delegate "
+            f"for work in an ordinary directory.",
+        )
+
     chosen_model, chosen_effort, error = _resolve_settings(model, effort)
     if error:
         return _error("invalid_model", error)
@@ -131,6 +183,9 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
     effective_timeout = timeout or Config.TIMEOUT
     if effective_timeout <= 0:
         return _error("invalid_request", "timeout must be positive.")
+
+    if verify_timeout < 0:
+        return _error("invalid_request", "verify_timeout must be positive.")
 
     request = {
         "kind": kind,
@@ -140,21 +195,27 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
         "sandbox": "workspace-write" if write else "read-only",
         "write": write,
         "timeout": effective_timeout,
+        "verify_timeout": verify_timeout or verify.DEFAULT_VERIFY_TIMEOUT,
         **request_fields,
     }
 
     # Check-and-claim must be atomic, or two concurrent launches both see a
-    # free tree and both start.
-    with _launch_lock:
-        conflict = jobs.find_conflict(project_dir, write)
-        if conflict:
-            return _error(
-                "repo_busy",
-                _conflict_message(conflict, project_dir, write),
-                blocking_job_id=conflict["id"],
-                blocking_job_status=conflict.get("status"),
-            )
-        record = jobs.create_job(kind, request)
+    # free tree and both start. The lock spans processes because the racing
+    # launches usually are in different ones — every session runs its own
+    # server against the same job store on disk.
+    try:
+        with jobs.launch_lock():
+            conflict = jobs.find_conflict(project_dir, write)
+            if conflict:
+                return _error(
+                    "repo_busy",
+                    _conflict_message(conflict, project_dir, write),
+                    blocking_job_id=conflict["id"],
+                    blocking_job_status=conflict.get("status"),
+                )
+            record = jobs.create_job(kind, request)
+    except TimeoutError as exc:
+        return _error("store_busy", f"{exc} Try again in a moment.")
 
     _spawn_worker(record["id"])
 
@@ -191,6 +252,11 @@ def _summarize(record: dict) -> dict:
         "elapsed_seconds": elapsed,
         "thread_id": record.get("thread_id"),
         "error": record.get("error"),
+        # The classification, not just the prose. The worker records why a job
+        # failed, but nothing used to return it, so a caller could not tell a
+        # quota wall from a bad slug without pattern-matching the message —
+        # and the documented response to each is different.
+        "error_type": record.get("error_type"),
     }
 
 
@@ -209,6 +275,7 @@ def codex_delegate(
     context: str = "",
     result_schema: dict | None = None,
     verify_command: str = "",
+    verify_timeout: int = 0,
     timeout: int = 0,
 ) -> str:
     """Delegate ANY task to Codex — engineering, research, writing, analysis.
@@ -235,6 +302,9 @@ def codex_delegate(
             validated JSON object matching it, returned as structured_output.
         verify_command: Shell command run after the task to check the work
             (e.g. "pytest -q"). Its real exit code gates the verified verdict.
+        verify_timeout: Seconds to allow verify_command (default 900). Raise
+            it for a suite slower than that — a timeout is reported as a
+            failed verification.
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
 
     Returns:
@@ -253,6 +323,7 @@ def codex_delegate(
         context=context,
         result_schema=result_schema,
         verify_command=verify_command,
+        verify_timeout=verify_timeout,
     )
 
 
@@ -264,6 +335,7 @@ def codex_follow_up(
     model: str = "",
     effort: str = "",
     verify_command: str = "",
+    verify_timeout: int = 0,
     timeout: int = 0,
 ) -> str:
     """Continue an earlier Codex job in its original thread.
@@ -280,6 +352,7 @@ def codex_follow_up(
         model: Override the model (defaults to the original job's).
         effort: Override the effort (defaults to the original job's).
         verify_command: Shell command to check the work afterwards.
+        verify_timeout: Seconds to allow verify_command (default 900).
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
 
     Returns:
@@ -323,6 +396,7 @@ def codex_follow_up(
         resume_thread_id=thread_id,
         parent_job_id=resolved,
         verify_command=verify_command,
+        verify_timeout=verify_timeout,
     )
 
 
@@ -546,6 +620,7 @@ def codex_review_and_fix(
     model: str = "",
     effort: str = "",
     verify_command: str = "",
+    verify_timeout: int = 0,
     timeout: int = 0,
 ) -> str:
     """Review code changes AND auto-fix clear-cut P0-P2 findings in one pass.
@@ -578,6 +653,7 @@ def codex_review_and_fix(
         focus=focus or Config.FOCUS,
         context=context,
         verify_command=verify_command,
+        verify_timeout=verify_timeout,
     )
 
 
@@ -589,6 +665,7 @@ def codex_fix(
     model: str = "",
     effort: str = "",
     verify_command: str = "",
+    verify_timeout: int = 0,
     timeout: int = 0,
 ) -> str:
     """Fix specific approved findings (second pass after human review).
@@ -617,7 +694,26 @@ def codex_fix(
         findings=findings,
         context=context,
         verify_command=verify_command,
+        verify_timeout=verify_timeout,
     )
+
+
+def _startup_warnings() -> None:
+    """Report configuration problems once, at startup.
+
+    Kept out of import for the same reason as _startup_sweep: Config.validate()
+    reaches the live model catalog, which shells out to `codex debug models`.
+    Merely importing this module — a test, a smoke check — should not spawn a
+    subprocess or depend on codex being installed.
+    """
+    try:
+        for warning in Config.validate():
+            print(f"[codex-review-server] WARNING: {warning}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - never block startup on a warning
+        print(
+            f"[codex-review-server] WARNING: config check failed: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _startup_sweep() -> None:
@@ -644,5 +740,6 @@ def _startup_sweep() -> None:
 
 
 if __name__ == "__main__":
+    _startup_warnings()
     _startup_sweep()
     server.run(transport="stdio")

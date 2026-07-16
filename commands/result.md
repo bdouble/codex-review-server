@@ -1,7 +1,7 @@
 ---
 description: Collect and validate the result of a finished Codex job
 argument-hint: "[job-id]"
-allowed-tools: mcp__codex-delegate__codex_result, mcp__codex-delegate__codex_status, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*)
+allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_result, mcp__plugin_codex-delegate_codex-delegate__codex_status, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*)
 ---
 
 # Codex Job Result

@@ -29,29 +29,50 @@ def repo(tmp_path):
 
 
 class TestParsePorcelain:
+    # Input here is `git status --porcelain -z`: entries are NUL-terminated
+    # rather than newline-separated, and paths are never quoted or escaped.
+
     def test_unstaged_modification_keeps_full_path(self):
         # Regression: `git status --porcelain` puts status in the first two
         # columns, so an unstaged edit starts with a space. Stripping the raw
         # output shifted the parse and turned "calc.py" into "alc.py".
-        entries = verify._parse_porcelain(" M calc.py\n")
+        entries = verify._parse_porcelain(" M calc.py\0")
         assert entries == {"calc.py": " M"}
 
     def test_untracked_file(self):
-        assert verify._parse_porcelain("?? new.py\n") == {"new.py": "??"}
+        assert verify._parse_porcelain("?? new.py\0") == {"new.py": "??"}
 
     def test_staged_and_modified(self):
-        assert verify._parse_porcelain("MM calc.py\n") == {"calc.py": "MM"}
+        assert verify._parse_porcelain("MM calc.py\0") == {"calc.py": "MM"}
 
     def test_rename_uses_new_path(self):
-        entries = verify._parse_porcelain("R  old.py -> new.py\n")
+        # -z puts the source path in its own field after the entry, rather
+        # than rendering "old -> new" inline.
+        entries = verify._parse_porcelain("R  new.py\0old.py\0")
         assert entries == {"new.py": "R "}
 
+    def test_rename_source_is_not_parsed_as_its_own_entry(self):
+        # Regression: failing to consume the source field parses "old.py" as
+        # an entry with status "ol" and path "y".
+        entries = verify._parse_porcelain("R  new.py\0old-name.py\0 M calc.py\0")
+        assert entries == {"new.py": "R ", "calc.py": " M"}
+
+    def test_non_ascii_path_is_not_escaped(self):
+        # Regression: without -z git C-quotes this as "caf\303\251.py", a name
+        # that matches nothing on disk — so its hash read <absent> before and
+        # after and a real edit to it was invisible to every signal.
+        entries = verify._parse_porcelain(" M caf\u00e9.py\0")
+        assert entries == {"caf\u00e9.py": " M"}
+
+    def test_path_with_spaces(self):
+        assert verify._parse_porcelain("?? my notes.md\0") == {"my notes.md": "??"}
+
     def test_multiple_entries(self):
-        entries = verify._parse_porcelain(" M calc.py\n?? test_calc.py\nA  x.py\n")
+        entries = verify._parse_porcelain(" M calc.py\0?? test_calc.py\0A  x.py\0")
         assert entries == {"calc.py": " M", "test_calc.py": "??", "x.py": "A "}
 
-    def test_ignores_blank_and_short_lines(self):
-        assert verify._parse_porcelain("\n\nx\n") == {}
+    def test_ignores_blank_and_short_entries(self):
+        assert verify._parse_porcelain("\0\0x\0") == {}
 
 
 class TestGitHelper:
@@ -184,12 +205,22 @@ class TestVerify:
         assert report["git"]["committed"] is True
         assert "committed.py" in report["git"]["files_changed"]
 
-    def test_non_repo_skips_git_checks(self, tmp_path):
+    def test_non_repo_skips_git_checks_for_a_read_only_task(self, tmp_path):
         before = verify.snapshot(str(tmp_path))
-        report = verify.verify(str(tmp_path), before, write=True)
+        report = verify.verify(str(tmp_path), before, write=False)
         assert report["git"]["is_repo"] is False
         assert report["checks"][0]["status"] == "skip"
         assert report["verified"] is True
+
+    def test_non_repo_write_is_never_reported_as_verified(self, tmp_path):
+        # --skip-git-repo-check lets a write task run against unversioned
+        # files. Nothing observes what it did there and git cannot undo it, so
+        # verified:true would be a claim about a check that never happened.
+        before = verify.snapshot(str(tmp_path))
+        report = verify.verify(str(tmp_path), before, write=True)
+        assert report["git"]["is_repo"] is False
+        assert report["checks"][0]["status"] == "fail"
+        assert report["verified"] is False
 
 
 class TestVerifyCommand:

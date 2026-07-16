@@ -149,16 +149,34 @@ is indistinguishable from a hang.
 
 ## When things go wrong
 
+A failed job carries an `error_type` alongside its `error` message — branch on
+that field, not on the prose, which is written for the user and will change.
+
+| `error_type` | Meaning | Response |
+|---|---|---|
+| `rate_limit`, message says *quota exhausted* | Out of quota | Drop to `gpt-5.6-luna` or a lower effort, or wait for the reset in the message |
+| `rate_limit`, message says *rate limited* | Transient throttle | Retry shortly |
+| `auth_error` | Session expired | The user runs `codex login` — you cannot do it for them |
+| `codex_not_found` | CLI not installed | `npm i -g @openai/codex` |
+| `codex_error` | Everything else codex rejected | Read the message: it always carries codex's own words verbatim |
+| `worker_error` | The job's own worker broke, not codex | A bug here — report the message rather than retrying |
+
+Errors returned by the *tool call* itself, before any job exists, have an
+`error` field instead:
+
 | Symptom | Meaning | Response |
 |---|---|---|
-| `rate_limit` with `usage_limit_reached` | Quota exhausted | Drop to `gpt-5.6-luna` or a lower effort, or wait for the reset in the message |
-| `rate_limit` without it | Transient throttle | Retry shortly |
-| `codex_not_found` | CLI not installed | `npm i -g @openai/codex` |
-| auth failure | Session expired | The user runs `codex login` — you cannot do it for them |
 | `invalid_model` | Deprecated slug or bad effort for that model | Check `codex_models` |
 | `repo_busy` | Another job holds that working tree | Wait for it, cancel it, or use a different repo — never retry in a loop |
+| `store_busy` | Another launch is mid-claim on the job store | Retry once after a moment |
+| `not_a_repo` | `codex_review`/`codex_review_and_fix` outside a git repo — they review a branch diff, so there is nothing to read | Point at a repository, or use `codex_delegate` for an ordinary directory |
+| `unsafe_project_dir` | A write task aimed at a home or system root, which would hand Codex every file beneath it | Almost always a path one segment short — name the actual project directory |
 | `status: timeout` | Deadline hit | Output is salvaged partial work — treat as incomplete. Narrow the task or raise `CODEX_TIMEOUT` |
 | Job stuck `running` | Long `max`/`ultra` run | Check `phase`. Cancel with `codex_cancel` if genuinely wedged |
+
+A classification is a hint about what to try, never the whole story: codex
+shares its stderr with the other MCP servers in the user's config, so the typed
+message always carries the raw text too. Read it before acting on the label.
 
 Never silently substitute your own work for a Codex run that failed. If the
 delegation didn't happen, say so — the user asked for a second model's view,
