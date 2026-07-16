@@ -139,15 +139,21 @@ def _classify_failure(stderr: str, turn_error: str, exit_code: int) -> None:
         part.strip() for part in (turn_error, stderr) if part and part.strip()
     )
 
-    for text in (turn_error, stderr):
-        if not text or not text.strip():
-            continue
-        matched = _match_failure(text)
-        if matched is not None:
-            error_class, message = matched
-            raise error_class(
-                f"{message}\n\nCodex reported (exit {exit_code}): {detail[:1500]}"
-            )
+    # One source decides, and it is turn_error whenever codex produced one —
+    # not merely when turn_error happens to match something we recognise.
+    # Falling through on an unrecognised turn_error hands the verdict straight
+    # back to the bystanders: codex reporting an unknown model slug, plus a
+    # notion MCP server's routine token refresh 401, classifies as auth_error
+    # and sends the user to `codex login` for a typo. Recognising nothing is
+    # not the same as having nothing to go on.
+    source = turn_error if (turn_error and turn_error.strip()) else stderr
+    matched = _match_failure(source) if (source and source.strip()) else None
+
+    if matched is not None:
+        error_class, message = matched
+        raise error_class(
+            f"{message}\n\nCodex reported (exit {exit_code}): {detail[:1500]}"
+        )
 
     raise CodexError(f"Codex CLI failed (exit {exit_code}): {detail[:2000]}")
 

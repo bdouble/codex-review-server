@@ -35,7 +35,7 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
   server is declared inline in `plugin.json`; a root `.mcp.json` would be
   loaded as *project* config, where `${CLAUDE_PLUGIN_ROOT}` does not expand.
-- **`tests/`** — 281 pytest tests. No Codex calls; the CLI is stubbed.
+- **`tests/`** — 287 pytest tests. No Codex calls; the CLI is stubbed.
 
 ## Development Commands
 

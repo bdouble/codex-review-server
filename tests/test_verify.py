@@ -258,3 +258,55 @@ class TestVerifyCommand:
         # project's environment, not ours.
         result = verify.run_verify_command("echo $VIRTUAL_ENV", str(repo))
         assert result["output_tail"].strip() == ""
+
+
+class TestUntrackedEmbeddedRepo:
+    def test_writes_inside_an_untracked_nested_repo_are_detected(self, tmp_path):
+        # --untracked-files=all cannot descend into an embedded repository:
+        # porcelain collapses it to "?? vendor/" however much changes inside.
+        # A directory entry reaching _hash_files therefore has to be walked, or
+        # it reads <absent> both sides and the blind spot survives in miniature.
+        import subprocess as sp
+        repo = tmp_path / "repo"
+        (repo / "vendor").mkdir(parents=True)
+        sp.run(["git", "init", "-q"], cwd=repo, check=True)
+        sp.run(["git", "config", "user.email", "t@t.co"], cwd=repo, check=True)
+        sp.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+        (repo / "tracked.py").write_text("x\n")
+        sp.run(["git", "add", "-A"], cwd=repo, check=True)
+        sp.run(["git", "commit", "-qm", "init"], cwd=repo, check=True)
+
+        # An untracked *embedded* repo — git will not look inside it.
+        sp.run(["git", "init", "-q"], cwd=repo / "vendor", check=True)
+        (repo / "vendor" / "lib.py").write_text("original\n")
+
+        before = verify.snapshot(str(repo))
+        assert before["entries"] == {"vendor/": "??"}, before["entries"]
+
+        (repo / "vendor" / "lib.py").write_text("REWRITTEN\n")
+        report = verify.verify(str(repo), before, write=False)
+
+        assert report["git"]["files_changed"] == ["vendor/"]
+        assert report["checks"][0]["status"] == "fail"
+        assert report["verified"] is False
+
+    def test_an_untouched_nested_repo_is_not_reported_as_changed(self, tmp_path):
+        import subprocess as sp
+        repo = tmp_path / "repo"
+        (repo / "vendor").mkdir(parents=True)
+        sp.run(["git", "init", "-q"], cwd=repo, check=True)
+        sp.run(["git", "init", "-q"], cwd=repo / "vendor", check=True)
+        (repo / "vendor" / "lib.py").write_text("original\n")
+
+        before = verify.snapshot(str(repo))
+        report = verify.verify(str(repo), before, write=False)
+        assert report["git"]["files_changed"] == []
+        assert report["verified"] is True
+
+
+class TestNumstatTabs:
+    def test_path_containing_a_tab_is_not_split(self):
+        # _parse_porcelain handles this correctly; _numstat used a bare split()
+        # and produced a phantom entry named "ta".
+        stats = verify._numstat_fields("1\t0\tta\tb.py\0")
+        assert stats == {"ta\tb.py": "1,0"}

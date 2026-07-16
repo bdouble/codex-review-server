@@ -122,7 +122,10 @@ class Config:
 
     @classproperty
     def EFFORT(cls) -> str:
-        return LEGACY_EFFORTS.get(cls._raw_effort(), cls._raw_effort())
+        # One read: dict.get evaluates both arguments, so passing the call
+        # twice re-parsed .env and could see two different files.
+        raw = cls._raw_effort()
+        return LEGACY_EFFORTS.get(raw, raw)
 
     @staticmethod
     def _raw_effort() -> str:

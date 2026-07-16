@@ -246,3 +246,34 @@ class TestPrompts:
         assert "now do y" in follow_up
         assert "<working_agreement>" not in follow_up
         assert len(follow_up) < len(build_delegate_prompt("now do y", "/repo", False))
+
+
+class TestClassifierPrecedence:
+    def test_unrecognised_turn_error_does_not_fall_through_to_stderr(self):
+        # Regression: preferring turn_error only when it *matched* handed the
+        # verdict straight back to the bystanders. Codex naming a model that
+        # does not exist, plus a notion MCP server's routine token-refresh
+        # 401, classified as auth_error — sending the user to `codex login`
+        # for a typo, on a field _summarize now invites them to branch on.
+        with pytest.raises(CodexError) as excinfo:
+            _classify_failure(
+                "[mcp:notion] WARN failed to refresh token: HTTP 401 Unauthorized",
+                "stream error: model 'gpt-5.9-foo' does not exist",
+                1,
+            )
+        assert not isinstance(excinfo.value, CodexAuthError)
+        assert "gpt-5.9-foo" in str(excinfo.value)
+
+    def test_unrecognised_turn_error_is_not_overridden_by_rate_limit_noise(self):
+        with pytest.raises(CodexError) as excinfo:
+            _classify_failure(
+                "[mcp:github] WARN secondary rate limit hit, backing off 30s",
+                "stream error: model 'gpt-5.9-foo' does not exist",
+                1,
+            )
+        assert not isinstance(excinfo.value, CodexRateLimitError)
+
+    def test_stderr_still_classifies_when_codex_reported_no_turn_error(self):
+        # Not every failure produces turn.failed; stderr is all we have then.
+        with pytest.raises(CodexRateLimitError):
+            _classify_failure('{"error":"usage_limit_reached"}', "", 1)

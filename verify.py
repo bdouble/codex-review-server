@@ -10,6 +10,7 @@ Every check is grounded in observable state, never in Codex's narration.
 """
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -91,13 +92,19 @@ def _numstat(cwd: str) -> dict[str, str]:
     path field followed by the source and destination as two further fields.
     """
     ok, out = _git(["diff", "HEAD", "--numstat", "-z"], cwd)
-    if not ok:
-        return {}
-    fields = _split_z(out)
+    return _numstat_fields(out) if ok else {}
+
+
+def _numstat_fields(text: str) -> dict[str, str]:
+    """Parse `git diff --numstat -z` output. Split out so it can be tested
+    against exact bytes rather than whatever git happens to emit."""
+    fields = _split_z(text)
     stats = {}
     index = 0
     while index < len(fields):
-        parts = fields[index].split("\t")
+        # maxsplit: the path is the rest of the field, tabs and all. A
+        # bare split() turns "ta\tb.py" into a phantom entry named "ta".
+        parts = fields[index].split("\t", 2)
         index += 1
         if len(parts) < 3:
             continue
@@ -108,6 +115,33 @@ def _numstat(cwd: str) -> dict[str, str]:
         if path:
             stats[path] = f"{added},{deleted}"
     return stats
+
+
+def _hash_tree(root: Path) -> str:
+    """One hash over every file beneath `root` — relative path and bytes both.
+
+    --untracked-files=all lists untracked files individually, so a directory
+    entry now only reaches _hash_files for a tree git will not look inside: an
+    untracked *embedded repository*, which porcelain collapses to `?? vendor/`
+    however much changes in it. Calling that `<absent>`, as a plain "not a
+    file" branch does, is the same blind spot in a smaller room — a task can
+    rewrite every file in there and no signal moves.
+
+    Walking it is affordable precisely because it is rare: anything large
+    enough to hurt is normally gitignored, and gitignored paths never appear
+    in porcelain at all.
+    """
+    digest = hashlib.sha256()
+    for current, dirs, files in os.walk(root):
+        dirs.sort()
+        for name in sorted(files):
+            entry = Path(current) / name
+            digest.update(str(entry.relative_to(root)).encode())
+            try:
+                digest.update(hashlib.sha256(entry.read_bytes()).digest())
+            except OSError:
+                digest.update(b"<unreadable>")
+    return digest.hexdigest()
 
 
 def _hash_files(root: str, paths) -> dict[str, str]:
@@ -127,6 +161,10 @@ def _hash_files(root: str, paths) -> dict[str, str]:
 
     Only baseline-dirty and untracked paths are hashed, never the whole repo,
     so this stays cheap: a clean file cannot change without git noticing.
+
+    Gitignored paths are a known gap: they never reach porcelain, so an edit to
+    `.env` or `build/` is invisible here. Surfacing them would mean --ignored,
+    which floods the report with __pycache__ and .venv on every run.
     """
     hashes = {}
     base = Path(root)
@@ -135,6 +173,8 @@ def _hash_files(root: str, paths) -> dict[str, str]:
         try:
             if target.is_file():
                 hashes[path] = hashlib.sha256(target.read_bytes()).hexdigest()
+            elif target.is_dir():
+                hashes[path] = _hash_tree(target)
             else:
                 hashes[path] = "<absent>"
         except OSError:

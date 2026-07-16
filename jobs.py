@@ -517,8 +517,11 @@ def find_conflict(project_dir: str, write: bool) -> dict | None:
     would fail). Refusing the unsafe combination is the honest trade.
 
     Two jobs share a tree when git resolves them to the same repository root,
-    or — outside a repository, where there is no root to compare — when one
-    directory sits inside the other and its files are therefore reachable.
+    or when one directory sits inside the other — a job in a parent can reach
+    the child's files whether or not git considers them separate trees, so an
+    embedded or vendored repository conflicts with the repository around it.
+    That is deliberately conservative: refusing a rare, legitimate pairing
+    costs a wait, while allowing a real overlap costs corrupted work.
 
     Reconciliation runs during list_jobs(), so a crashed job's stale record
     cannot hold the lock.

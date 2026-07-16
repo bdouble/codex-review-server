@@ -185,7 +185,11 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
         return _error("invalid_request", "timeout must be positive.")
 
     if verify_timeout < 0:
-        return _error("invalid_request", "verify_timeout must be positive.")
+        return _error(
+            "invalid_request",
+            "verify_timeout cannot be negative. Omit it, or pass 0, for "
+            f"the default of {verify.DEFAULT_VERIFY_TIMEOUT}s.",
+        )
 
     request = {
         "kind": kind,
