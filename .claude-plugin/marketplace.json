@@ -1,0 +1,46 @@
+{
+  "name": "codex-delegate",
+  "owner": {
+    "name": "Brian Benitez",
+    "email": "brian.f.benitez@gmail.com"
+  },
+  "metadata": {
+    "description": "Delegate any task to OpenAI's Codex CLI from Claude Code — background jobs, GPT-5.6 model class, session resume, and verification grounded in git rather than the model's self-report"
+  },
+  "plugins": [
+    {
+      "name": "codex-delegate",
+      "source": "./",
+      "description": "Use Claude Code as a multi-agent orchestrator with Codex as a delegate. Any task — engineering, research, writing — runs as a background job you can monitor, resume, and verify. Supports GPT-5.6 Sol/Terra/Luna at any effort up to ultra.",
+      "version": "2.0.0",
+      "author": {
+        "name": "Brian Benitez",
+        "email": "brian.f.benitez@gmail.com"
+      },
+      "homepage": "https://github.com/bdouble/codex-review-server",
+      "repository": "https://github.com/bdouble/codex-review-server",
+      "license": "MIT",
+      "keywords": [
+        "codex",
+        "openai",
+        "gpt-5.6",
+        "delegation",
+        "multi-agent",
+        "orchestration",
+        "cross-model",
+        "code-review",
+        "mcp",
+        "background-jobs",
+        "verification"
+      ],
+      "category": "development",
+      "tags": [
+        "codex",
+        "delegation",
+        "orchestration",
+        "code-review",
+        "cross-model"
+      ]
+    }
+  ]
+}

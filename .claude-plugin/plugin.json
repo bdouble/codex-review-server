@@ -1,0 +1,33 @@
+{
+  "name": "codex-delegate",
+  "version": "2.0.0",
+  "description": "Delegate any engineering, research, or writing task to OpenAI's Codex CLI from Claude Code. Background jobs, GPT-5.6 (Sol/Terra/Luna), session resume, structured output, and git-grounded verification of what Codex actually did.",
+  "author": {
+    "name": "Brian Benitez",
+    "email": "brian.f.benitez@gmail.com",
+    "url": "https://github.com/bdouble"
+  },
+  "homepage": "https://github.com/bdouble/codex-review-server",
+  "repository": "https://github.com/bdouble/codex-review-server",
+  "license": "MIT",
+  "mcpServers": {
+    "codex-delegate": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run-server.sh",
+      "args": []
+    }
+  },
+  "keywords": [
+    "codex",
+    "openai",
+    "gpt-5.6",
+    "delegation",
+    "multi-agent",
+    "orchestration",
+    "cross-model",
+    "code-review",
+    "mcp",
+    "subagent",
+    "background-jobs",
+    "verification"
+  ]
+}

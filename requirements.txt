@@ -1,1 +1,4 @@
 mcp>=1.0.0
+# Imported directly by config.py for live .env reload. It arrives transitively
+# via mcp today, but a direct import deserves a direct pin.
+python-dotenv>=1.0.0
