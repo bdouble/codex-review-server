@@ -15,6 +15,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="$ROOT/.venv"
 VENV_PY="$VENV/bin/python3"
 
+# Codex can be installed independently of the Node version that a target
+# project selects through nvm. Prefer the user's stable command directory so
+# this MCP works when Claude launches it outside an interactive login shell.
+# The directory may not exist on a fresh install; leaving PATH unchanged keeps
+# the normal system/global lookup behavior in that case.
+USER_BIN="${HOME:-}/.local/bin"
+if [[ -n "$USER_BIN" && -d "$USER_BIN" ]]; then
+  export PATH="$USER_BIN:$PATH"
+fi
+
 log() { printf '[codex-delegate] %s\n' "$1" >&2; }
 
 has_deps() {

@@ -64,6 +64,12 @@ class TestManifests:
         assert re.match(r"^\d+\.\d+\.\d+$", manifest["version"])
         assert manifest["description"]
 
+    def test_launcher_prefers_the_user_command_directory(self):
+        """The MCP must find a standalone Codex launcher outside a login shell."""
+        launcher = (ROOT / "scripts" / "run-server.sh").read_text()
+        assert 'USER_BIN="${HOME:-}/.local/bin"' in launcher
+        assert 'export PATH="$USER_BIN:$PATH"' in launcher
+
     def test_marketplace_json_is_valid(self):
         market = json.loads(
             (ROOT / ".claude-plugin" / "marketplace.json").read_text()

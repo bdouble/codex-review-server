@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config
 import jobs
 import server as server_module
 import verify
@@ -33,6 +34,15 @@ from server import (
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_STATE_DIR", str(tmp_path / "state"))
+    # Server-tool tests must assert the documented defaults, not inherit the
+    # developer's live .env (which may intentionally select another model).
+    monkeypatch.setattr(config, "_ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(config, "_overridden", {})
+    for key in (
+        "CODEX_MODEL", "CODEX_EFFORT", "CODEX_REVIEW_MODEL",
+        "CODEX_REVIEW_REASONING", "CODEX_TIMEOUT",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(server_module, "_spawn_worker", lambda job_id: None)
     monkeypatch.setattr(server_module, "find_codex_binary", lambda: "/usr/bin/codex")
     # Tests simulate a live worker with their own pid; let the identity check

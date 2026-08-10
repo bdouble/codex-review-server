@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] — 2026-08-10
+
+### Fixed
+
+- **The MCP now finds one stable Codex CLI across nvm projects.** The launcher
+  prioritizes `~/.local/bin` before starting the server, so a user-maintained
+  Codex launcher remains discoverable when Claude starts the plugin outside an
+  interactive login shell or the target project selects a different Node
+  version. The normal PATH lookup remains unchanged when that directory is not
+  present.
+- **Server-tool tests no longer inherit a developer's live model selection.**
+  The tests now isolate `.env` and `CODEX_*` model settings, so their documented
+  default assertions are repeatable even when an installation intentionally
+  configures another default model.
+
+### Added
+
+- A launcher regression test covering stable user-command-directory precedence.
+
 ## [2.1.0] — 2026-07-15
 
 A version bump so `error_type` reliably reaches callers.
