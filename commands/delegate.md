@@ -1,6 +1,6 @@
 ---
 description: Delegate a task to Codex as a background agent — engineering, research, or writing
-argument-hint: "<task> [--write] [--model sol|terra|luna] [--effort low|medium|high|xhigh|max|ultra] [--verify <cmd>] [--wait]"
+argument-hint: "<task> [--write] [--model astra|sol|terra|luna|daybreak|spark] [--effort low|medium|high|xhigh|max|ultra] [--verify <cmd>] [--wait]"
 allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_delegate, mcp__plugin_codex-delegate_codex-delegate__codex_status, mcp__plugin_codex-delegate_codex-delegate__codex_result, mcp__plugin_codex-delegate_codex-delegate__codex_models, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*)
 ---
 
@@ -20,8 +20,8 @@ $ARGUMENTS
 | Flag | Meaning |
 |---|---|
 | `--write` | Allow file edits (`write=True`). Without it the run is read-only. |
-| `--model` | `sol` → `gpt-5.6-sol`, `terra` → `gpt-5.6-terra`, `luna` → `gpt-5.6-luna`. A full slug also works. |
-| `--effort` | `low`…`xhigh`, plus `max` and `ultra` (GPT-5.6 only; `ultra` is Sol/Terra only). |
+| `--model` | `astra` → `gpt-6-astra`, `sol` → `gpt-5.6-sol`, `terra` → `gpt-5.6-terra`, `luna` → `gpt-5.6-luna`, `daybreak` → `gpt-daybreak-blue-latest`, `spark` → `gpt-5.3-codex-spark`. A full slug also works. |
+| `--effort` | `low`…`xhigh`, plus `max` and `ultra`. Support is per-model; `codex_models` is the authority. |
 | `--verify` | Shell command to check the work, e.g. `--verify "pytest -q"`. |
 | `--wait` | Block until done instead of returning the job id. |
 

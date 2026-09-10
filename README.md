@@ -52,32 +52,44 @@ Slash commands: `/codex:delegate`, `/codex:review`, `/codex:status`,
 
 ## Models
 
-The GPT-5.6 class, as three durable capability tiers:
+Durable capability tiers rather than a version list:
 
 | Model | Best for | Efforts |
 |-------|----------|---------|
+| `gpt-6-astra` | GPT-6. The most capable model, for complex, demanding work. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-sol` | Frontier. Ambiguous, difficult, high-value work. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-terra` | The pragmatic all-rounder. **Default.** | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-luna` | Fast. Extraction, classification, structured summaries. | low → xhigh, `max` |
-| `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` | Previous generation. | low → xhigh |
+| `gpt-daybreak-blue-latest` | Defensive cybersecurity work. Access-gated. | low → xhigh, `max`, `ultra` |
+| `gpt-5.3-codex-spark` | Ultra-fast. Small, mechanical, well-specified edits. | low → xhigh |
+| `gpt-5.5` | Previous generation. | low → xhigh |
 
 Default: **`gpt-5.6-terra` at `xhigh`**.
 
 Things that will bite you if you don't know them — all enforced by the server:
 
-- **Effort validity is per-model.** Luna has no `ultra`. The 5.4/5.5 family has
+- **Effort validity is per-model.** Luna has no `ultra`. 5.5 and Spark have
   neither `max` nor `ultra`. An invalid pair is rejected up front rather than
   failing ten minutes in.
-- **`ultra` coordinates four agents in parallel.** Much slower and costlier.
-- **Sol defaults to `low`** and is strong there. Start lower than you'd think.
+- **`ultra` coordinates several agents in parallel.** Much slower and costlier.
+- **Sol and Daybreak default to `low`** and are strong there. Start lower than
+  you'd think.
+- **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
+  approved for it, so it is normal for `codex_models` not to list it.
 - **Use the full slug.** Bare `gpt-5.6` does not resolve under ChatGPT auth.
-- **`gpt-5.3-codex` and `gpt-5.2` are dead** for ChatGPT accounts. Rejected with
-  a pointer to a live model.
+- **`gpt-5.3-codex`, `gpt-5.2`, and the `gpt-5.4` family are gone** for ChatGPT
+  accounts. Rejected with a pointer to a live model.
 
 The catalog is read live from the Codex CLI (`codex_models`), so a model
 released after this server was written works without a code change. That isn't
 gold-plating: the previous hardcoded default was retired by OpenAI and broke
-every call.
+every call. `codex_models` also reports each model's own one-line description,
+so routing advice comes from the catalog rather than from this table.
+
+The live catalog outranks the built-in list of dead slugs, in both directions.
+A model your account can actually use is never blocked by a stale constant —
+`gpt-5.3-codex-spark` spent a release deny-listed as unavailable while the CLI
+listed it as available, and that is the failure this ordering prevents.
 
 ## Verification
 

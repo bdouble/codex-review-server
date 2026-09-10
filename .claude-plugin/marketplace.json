@@ -5,14 +5,14 @@
     "email": "brian.f.benitez@gmail.com"
   },
   "metadata": {
-    "description": "Delegate any task to OpenAI's Codex CLI from Claude Code — background jobs, GPT-5.6 model class, session resume, and verification grounded in git rather than the model's self-report"
+    "description": "Delegate any task to OpenAI's Codex CLI from Claude Code \u2014 background jobs, GPT-5.6 model class, session resume, and verification grounded in git rather than the model's self-report"
   },
   "plugins": [
     {
       "name": "codex-delegate",
       "source": "./",
-      "description": "Use Claude Code as a multi-agent orchestrator with Codex as a delegate. Any task — engineering, research, writing — runs as a background job you can monitor, resume, and verify. Supports GPT-5.6 Sol/Terra/Luna at any effort up to ultra.",
-      "version": "2.1.1",
+      "description": "Use Claude Code as a multi-agent orchestrator with Codex as a delegate. Any task \u2014 engineering, research, writing \u2014 runs as a background job you can monitor, resume, and verify. Supports GPT-5.6 Sol/Terra/Luna at any effort up to ultra.",
+      "version": "2.2.0",
       "author": {
         "name": "Brian Benitez",
         "email": "brian.f.benitez@gmail.com"
@@ -23,7 +23,9 @@
       "keywords": [
         "codex",
         "openai",
+        "gpt-6",
         "gpt-5.6",
+        "daybreak",
         "delegation",
         "multi-agent",
         "orchestration",

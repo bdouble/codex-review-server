@@ -37,20 +37,27 @@ Don't ask the user — choose, then say what you chose and why.
 
 | Task | Model | Effort |
 |---|---|---|
-| Extraction, classification, structured summaries, mechanical edits | `gpt-5.6-luna` | `low`–`medium` |
+| Small, mechanical, fully specified edits | `gpt-5.3-codex-spark` | `low`–`medium` |
+| Extraction, classification, structured summaries | `gpt-5.6-luna` | `low`–`medium` |
 | Ordinary engineering: implement, fix, refactor, test | `gpt-5.6-terra` | `high`–`xhigh` |
 | Code review | `gpt-5.6-terra` | `xhigh` |
+| Security review, vulnerability hunting, hardening | `gpt-daybreak-blue-latest` | `high`–`xhigh` |
 | Ambiguous, high-value, or genuinely hard problems | `gpt-5.6-sol` | `xhigh`–`max` |
-| Last-resort hard problems where you'd otherwise be stuck | `gpt-5.6-sol` | `ultra` |
+| Complex, demanding work where you want the best model | `gpt-6-astra` | `high`–`max` |
+| Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-5.6-sol` | `ultra` |
 
 Constraints that are enforced, not advisory:
 
 - **Effort validity is per-model.** `gpt-5.6-luna` has no `ultra`. `gpt-5.5`
-  and the 5.4 family top out at `xhigh` — no `max`, no `ultra`.
-- **`ultra` runs four agents in parallel.** Slow and expensive. Justify it.
-- **Sol is strong at low effort.** Start lower than instinct suggests; its own
-  default is `low`.
-- **Always use the full slug.** Bare `gpt-5.6` fails under ChatGPT auth.
+  and `gpt-5.3-codex-spark` top out at `xhigh` — no `max`, no `ultra`.
+- **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
+- **Sol and Daybreak are strong at low effort.** Start lower than instinct
+  suggests; their own default is `low`.
+- **Daybreak Blue is access-gated.** It is the defensive-security model, and it
+  exists only on approved accounts. Check `codex_models` before routing to it,
+  and fall back to `gpt-5.6-terra` if the catalog does not list it.
+- **Always use the full slug.** Bare `gpt-5.6` fails under ChatGPT auth, and
+  Daybreak's slug really does end in `-latest`.
 
 Call `codex_models` for the live catalog when unsure — it reflects the account,
 not this document.

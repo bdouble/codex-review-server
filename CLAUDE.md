@@ -35,7 +35,7 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
   server is declared inline in `plugin.json`; a root `.mcp.json` would be
   loaded as *project* config, where `${CLAUDE_PLUGIN_ROOT}` does not expand.
-- **`tests/`** — 292 pytest tests. No Codex calls; the CLI is stubbed.
+- **`tests/`** — 323 pytest tests. No Codex calls; the CLI is stubbed.
 
 ## Development Commands
 
@@ -95,24 +95,33 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
 
 ## Codex CLI Gotchas
 
-Verified against codex-cli 0.144.4 on 2026-07-15. These contradict parts of the
-published docs — trust the CLI, and re-verify with `codex exec --help` before
-assuming.
+Re-verified against codex-cli 0.154.0 on 2026-09-10. These contradict parts of
+the published docs — trust the CLI, and re-verify with `codex exec --help`
+before assuming.
 
 - **`codex exec resume` has a different flag set than `codex exec`.** It rejects
   `--sandbox`, `--color`, and `-C/--cd`. Sandbox on a resume must go through
   `-c sandbox_mode="..."`.
 - **`-c` values are parsed as TOML**, so strings need quotes:
   `-c model_reasoning_effort='"xhigh"'`.
-- **Effort support is per-model.** Luna has no `ultra`; 5.4/5.5 have neither
-  `max` nor `ultra`. `codex debug models` is the authority.
+- **Effort support is per-model.** Luna has no `ultra`; 5.5 and
+  `gpt-5.3-codex-spark` have neither `max` nor `ultra`. `codex debug models` is
+  the authority, and it is per-account: the access-gated
+  `gpt-daybreak-blue-latest` appears only where it has been approved.
+- **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
+  account can use must never be blocked by a constant in this repo — that is
+  the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.
 - **Bare `gpt-5.6` fails under ChatGPT auth** — full slugs only.
-- **`gpt-5.3-codex` / `gpt-5.2` are deprecated** and return HTTP 400.
+- **`gpt-5.3-codex` / `gpt-5.2` / `gpt-5.4*` are gone** and return HTTP 400.
 - **stderr carries noise on successful runs** (other MCP servers in the user's
   codex config log auth errors there). Only classify errors when the exit code
   is non-zero.
-- `--json` emits `thread.started` (the id for resume) and `turn.completed`
-  (token usage).
+- **Out-of-quota is prose, not a code.** 0.154.0 says "You've hit your usage
+  limit … or try again at `<date>`" — no `usage_limit_reached`, no 429. Match
+  the wording, and re-check it after a CLI upgrade.
+- `--json` emits `thread.started` (the id for resume), `turn.completed` (token
+  usage), `turn.failed`, and a standalone `error` event that is sometimes the
+  only structured account of a failure.
 
 ## Environment Variables
 

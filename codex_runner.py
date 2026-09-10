@@ -8,7 +8,7 @@ Two things here are easy to get wrong and are handled explicitly:
 
 1. `codex exec` and `codex exec resume` do NOT share a flag set. `resume`
    rejects `--sandbox`, `--color`, and `-C/--cd`. Sandbox on a resume must go
-   through `-c sandbox_mode=...` instead. Verified against codex-cli 0.144.4.
+   through `-c sandbox_mode=...` instead. Re-verified against codex-cli 0.154.0.
 
 2. The prompt is fed via stdin (with `-` as the positional) rather than
    interpolated into an argv string. Task text routinely contains backticks and
@@ -61,17 +61,59 @@ def _build_env() -> dict:
     return env
 
 
+def _reset_hint(text: str) -> str:
+    """Extract when the quota resets, from either wording codex uses.
+
+    Two shapes, both seen in the wild:
+
+      structured  ..."reset_at": "2026-09-14T21:26:00Z"...
+      prose       ...or try again at Sep 14th, 2026 9:26 PM.
+
+    Matched against the original text rather than a lowercased copy, so the
+    date is quoted back to the user the way codex wrote it.
+    """
+    match = re.search(
+        r"resets?[_ ]at[\"']?\s*[:=]\s*[\"']?([^\"',}\s]+)", text, re.IGNORECASE
+    )
+    if match:
+        return f" Quota resets at {match.group(1)}."
+
+    match = re.search(r"try again (?:at|after|in)\s+(.+)", text, re.IGNORECASE)
+    if match:
+        hint = match.group(1)[:120]
+        # Stop at a sentence boundary, but not at the period inside an
+        # abbreviated date: a full stop only ends the sentence when a capital
+        # follows it. "Sep. 14th" survives; "5pm. Contact support" does not.
+        hint = re.split(r"\.\s+(?=[A-Z])", hint)[0]
+        # turn_error arrives as a JSON blob, so the date is routinely followed
+        # by `."}`. Left in, the hint reads `resets at Sep 14th, 2026 9:26 PM."}`.
+        hint = re.sub(r'[\s"\'}\],]+$', "", hint).rstrip(".")
+        if hint:
+            return f" Quota resets at {hint}."
+
+    return ""
+
+
 def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
     """Return the (error class, message) `text` describes, or None for neither."""
     lowered = text.lower()
 
     # Match 429 only in an HTTP-status context, not as a substring of token
     # counts, session ids, or line numbers.
+    #
+    # "usage limit" and "purchase more credits" are the prose wording codex-cli
+    # 0.154.0 actually emits — "You've hit your usage limit. Visit ... to
+    # purchase more credits or try again at <date>." The older machine-readable
+    # `usage_limit_reached` never appears in it, so matching only that spelling
+    # classified a plain out-of-quota run as an unknown failure and dropped the
+    # advice the user needed.
     is_rate_limit = (
         "rate limit" in lowered
         or "rate_limit" in lowered
+        or "usage limit" in lowered
         or "usage_limit_reached" in lowered
         or "insufficient_quota" in lowered
+        or "purchase more credits" in lowered
         or re.search(
             r"(?:http|status|code)\s+429\b|429\s+too\s+many\s+requests", lowered
         ) is not None
@@ -80,12 +122,12 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
         # Quota exhaustion and transient throttling need different responses:
         # one needs a different model or a wait until reset, the other a retry.
         exhausted = (
-            "usage_limit_reached" in lowered or "insufficient_quota" in lowered
+            "usage_limit_reached" in lowered
+            or "insufficient_quota" in lowered
+            or "usage limit" in lowered
+            or "purchase more credits" in lowered
         )
-        reset_hint = ""
-        match = re.search(r"resets?[_ ]at[\"']?\s*[:=]\s*[\"']?([^\"',}\s]+)", lowered)
-        if match:
-            reset_hint = f" Quota resets at {match.group(1)}."
+        reset_hint = _reset_hint(text)
         return CodexRateLimitError, (
             ("Codex quota exhausted." if exhausted else "Codex rate limited.")
             + reset_hint
@@ -264,7 +306,7 @@ def run_codex(
         handle.write(prompt)
 
     state = {"thread_id": None, "usage": None, "phase": "starting", "timed_out": False,
-             "turn_error": None}
+             "turn_error": None, "stream_error": None}
 
     # stderr goes to a file rather than a second pipe: draining only stdout
     # while stderr fills its pipe buffer would deadlock on a chatty run.
@@ -335,6 +377,14 @@ def run_codex(
                     state["usage"] = event.get("usage")
                 elif event_type == "turn.failed":
                     state["turn_error"] = json.dumps(event.get("error", {}))[:500]
+                elif event_type == "error":
+                    # A standalone `error` event. Codex usually emits one
+                    # alongside turn.failed, but not always — and when it is the
+                    # only structured account of the failure, the alternative is
+                    # classifying off stderr, which belongs to every MCP server
+                    # codex loaded rather than to codex. Kept separate so a
+                    # real turn.failed still outranks it.
+                    state["stream_error"] = str(event.get("message", ""))[:500]
                 elif event_type == "item.completed":
                     item = event.get("item", {})
                     state["phase"] = _phase_for_item(item, state["phase"])
@@ -387,7 +437,8 @@ def run_codex(
         }
 
     if proc.returncode != 0:
-        _classify_failure(stderr, state["turn_error"] or "", proc.returncode)
+        codex_error = state["turn_error"] or state["stream_error"] or ""
+        _classify_failure(stderr, codex_error, proc.returncode)
 
     return {
         "thread_id": state["thread_id"],

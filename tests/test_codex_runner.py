@@ -349,3 +349,189 @@ class TestWatchdogEnforcesTheDeadline:
         assert result["timed_out"] is True
         time.sleep(6)
         assert not marker.exists(), "codex's child outlived the run"
+
+
+class TestUsageLimitWordingFromCodex0154:
+    """The out-of-quota message codex-cli actually emits.
+
+    Captured live from codex-cli 0.154.0:
+
+      You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage
+      to purchase more credits or try again at Sep 14th, 2026 9:26 PM.
+
+    It contains none of the spellings the classifier used to look for — no
+    "rate limit", no `usage_limit_reached`, no 429 — so a plain out-of-quota
+    run was reported as an unknown failure, without the advice (drop to a
+    cheaper model, or wait for the reset) that is the entire point of having
+    a typed rate-limit error.
+    """
+
+    LIVE_MESSAGE = (
+        "You've hit your usage limit. Visit "
+        "https://chatgpt.com/codex/settings/usage to purchase more credits "
+        "or try again at Sep 14th, 2026 9:26 PM."
+    )
+
+    def test_live_wording_is_a_rate_limit(self):
+        with pytest.raises(CodexRateLimitError):
+            _classify_failure("", self.LIVE_MESSAGE, 1)
+
+    def test_live_wording_is_reported_as_exhaustion_not_throttling(self):
+        with pytest.raises(CodexRateLimitError, match="quota exhausted"):
+            _classify_failure("", self.LIVE_MESSAGE, 1)
+
+    def test_live_wording_suggests_a_cheaper_model(self):
+        with pytest.raises(CodexRateLimitError, match="gpt-5.6-luna"):
+            _classify_failure("", self.LIVE_MESSAGE, 1)
+
+    def test_prose_reset_time_is_surfaced(self):
+        # "try again at <date>" is prose, not the `reset_at:` field the old
+        # regex expected. Matching only the structured form dropped the one
+        # piece of information that tells the user how long to wait.
+        with pytest.raises(CodexRateLimitError, match=r"Sep 14th, 2026 9:26 PM"):
+            _classify_failure("", self.LIVE_MESSAGE, 1)
+
+    def test_reset_time_keeps_codex_casing(self):
+        # Matched against the raw text, not a lowercased copy, so the date is
+        # quoted back the way codex wrote it.
+        with pytest.raises(CodexRateLimitError) as excinfo:
+            _classify_failure("", self.LIVE_MESSAGE, 1)
+        assert "sep 14th" not in str(excinfo.value)
+
+    def test_structured_reset_field_still_wins(self):
+        with pytest.raises(CodexRateLimitError, match="2026-07-16"):
+            _classify_failure("", 'usage_limit_reached resets_at: 2026-07-16', 1)
+
+    def test_raw_message_is_still_attached(self):
+        # A classification is a hint, never a replacement for the evidence.
+        with pytest.raises(CodexRateLimitError, match="chatgpt.com/codex"):
+            _classify_failure("", self.LIVE_MESSAGE, 1)
+
+    def test_a_bystander_mentioning_usage_limits_does_not_win_over_turn_error(self):
+        # The precedence rule still holds: codex's own account decides.
+        with pytest.raises(CodexError) as excinfo:
+            _classify_failure(
+                "[mcp:notes] WARN approaching usage limit",
+                "stream error: model 'gpt-5.9-foo' does not exist",
+                1,
+            )
+        assert not isinstance(excinfo.value, CodexRateLimitError)
+
+
+class TestStandaloneErrorEvent:
+    """Codex emits a top-level {"type":"error"} event alongside turn.failed.
+
+    When it is the *only* structured account of a failure, the fallback used to
+    be stderr — a stream shared with every MCP server in the user's codex
+    config. Reading the error event keeps the verdict with codex.
+    """
+
+    @staticmethod
+    def _fake_codex(tmp_path, body):
+        script = tmp_path / "fake_codex.sh"
+        script.write_text(body)
+        script.chmod(0o755)
+        return str(script)
+
+    def _run(self, tmp_path, monkeypatch, body):
+        monkeypatch.setattr(
+            codex_runner, "find_codex_binary",
+            lambda: self._fake_codex(tmp_path, body),
+        )
+        return codex_runner.run_codex(
+            project_dir=str(tmp_path), prompt="x", model="m", effort="low",
+            sandbox="read-only",
+            output_file=str(tmp_path / "o.txt"),
+            prompt_file=str(tmp_path / "p.txt"),
+            stderr_file=str(tmp_path / "e.txt"),
+            timeout=30,
+        )
+
+    def test_error_event_classifies_when_there_is_no_turn_failed(
+        self, tmp_path, monkeypatch
+    ):
+        with pytest.raises(CodexRateLimitError):
+            self._run(tmp_path, monkeypatch, (
+                "#!/bin/bash\n"
+                'echo \'{"type":"thread.started","thread_id":"t1"}\'\n'
+                'echo \'{"type":"error","message":"You have hit your usage limit."}\'\n'
+                'echo "[mcp:notes] HTTP 401 Unauthorized" >&2\n'
+                "exit 1\n"
+            ))
+
+    def test_error_event_outranks_stderr_noise(self, tmp_path, monkeypatch):
+        # Without the error event this stderr classifies as an expired session
+        # and sends the user to `codex login` for an out-of-quota run.
+        with pytest.raises(CodexRateLimitError) as excinfo:
+            self._run(tmp_path, monkeypatch, (
+                "#!/bin/bash\n"
+                'echo \'{"type":"error","message":"You have hit your usage limit."}\'\n'
+                'echo "[mcp:notes] HTTP 401 Unauthorized" >&2\n'
+                "exit 1\n"
+            ))
+        assert not isinstance(excinfo.value, CodexAuthError)
+
+    def test_turn_failed_still_outranks_the_error_event(self, tmp_path, monkeypatch):
+        # Both are emitted on a normal failure; turn.failed is the richer one.
+        with pytest.raises(CodexError) as excinfo:
+            self._run(tmp_path, monkeypatch, (
+                "#!/bin/bash\n"
+                'echo \'{"type":"error","message":"usage limit"}\'\n'
+                'echo \'{"type":"turn.failed","error":{"message":"context_length_exceeded"}}\'\n'
+                "exit 1\n"
+            ))
+        assert "context_length_exceeded" in str(excinfo.value)
+        assert not isinstance(excinfo.value, CodexRateLimitError)
+
+    def test_an_error_event_on_a_successful_run_is_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        # Codex can emit a transient error and then recover. Exit 0 means
+        # success, and nothing is classified.
+        result = self._run(tmp_path, monkeypatch, (
+            "#!/bin/bash\n"
+            'echo \'{"type":"error","message":"transient usage limit blip"}\'\n'
+            'echo \'{"type":"thread.started","thread_id":"t1"}\'\n'
+            'echo \'{"type":"turn.completed","usage":{"input_tokens":5}}\'\n'
+        ))
+        assert result["thread_id"] == "t1"
+        assert result["timed_out"] is False
+
+
+class TestResetHintExtraction:
+    """The reset time is the one thing an out-of-quota user needs.
+
+    turn_error arrives as a JSON blob, so the prose date is wrapped in the
+    punctuation that closes it. Quoting that back verbatim produced
+    `Quota resets at Sep 14th, 2026 9:26 PM."}`.
+    """
+
+    def test_json_wrapper_punctuation_is_stripped(self):
+        blob = (
+            '{"message": "You have hit your usage limit. Visit '
+            'https://chatgpt.com/codex/settings/usage to purchase more credits '
+            'or try again at Sep 14th, 2026 9:26 PM."}'
+        )
+        assert codex_runner._reset_hint(blob) == (
+            " Quota resets at Sep 14th, 2026 9:26 PM."
+        )
+
+    def test_trailing_prose_is_not_swallowed(self):
+        text = "try again at 5pm. Contact support if this persists."
+        assert codex_runner._reset_hint(text) == " Quota resets at 5pm."
+
+    def test_an_abbreviated_date_keeps_its_period(self):
+        # A full stop ends the sentence only when a capital follows it.
+        text = 'try again at Sep. 14th, 2026."}'
+        assert codex_runner._reset_hint(text) == " Quota resets at Sep. 14th, 2026."
+
+    def test_structured_field_is_preferred(self):
+        text = 'reset_at: 2026-09-14T21:26:00Z — or try again at some other time'
+        assert "2026-09-14T21:26:00Z" in codex_runner._reset_hint(text)
+
+    def test_no_reset_information_yields_nothing(self):
+        assert codex_runner._reset_hint("rate limit exceeded") == ""
+
+    def test_a_runaway_capture_is_bounded(self):
+        text = "try again at " + "x" * 5000
+        assert len(codex_runner._reset_hint(text)) < 200

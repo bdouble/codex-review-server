@@ -197,3 +197,191 @@ class TestDescribe:
         assert described["source"] == "live"
         assert "gpt-5.6-terra" in described["models"]
         assert "gpt-5.3-codex" in described["deprecated"]
+
+
+# The catalog as codex-cli 0.154.0 reports it on an account approved for the
+# access-gated Daybreak model. Verified live on 2026-09-10.
+SAMPLE_0154 = {
+    "models": [
+        {
+            "slug": "gpt-6-astra",
+            "display_name": "GPT-6-Astra",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [
+                {"effort": "low"}, {"effort": "medium"}, {"effort": "high"},
+                {"effort": "xhigh"}, {"effort": "max"}, {"effort": "ultra"},
+            ],
+            "visibility": "list",
+        },
+        {
+            "slug": "gpt-daybreak-blue-latest",
+            "display_name": "Daybreak Blue",
+            "default_reasoning_level": "low",
+            "supported_reasoning_levels": [
+                {"effort": "low"}, {"effort": "medium"}, {"effort": "high"},
+                {"effort": "xhigh"}, {"effort": "max"}, {"effort": "ultra"},
+            ],
+            "visibility": "list",
+        },
+        {
+            "slug": "gpt-5.3-codex-spark",
+            "display_name": "GPT-5.3-Codex-Spark",
+            "default_reasoning_level": "high",
+            "supported_reasoning_levels": [
+                {"effort": "low"}, {"effort": "medium"}, {"effort": "high"},
+                {"effort": "xhigh"},
+            ],
+            "visibility": "list",
+        },
+        {
+            "slug": "gpt-reserve",
+            "display_name": "GPT-Reserve",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [{"effort": "medium"}],
+            "visibility": "hide",
+        },
+    ]
+}
+
+
+class TestCodex0154Catalog:
+    def test_new_models_need_no_code_change(self, monkeypatch):
+        # The whole point of reading the catalog live: gpt-6-astra and
+        # Daybreak Blue shipped after this server was written and are usable
+        # without touching models.py.
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        catalog = models.get_catalog()
+        assert "gpt-6-astra" in catalog
+        assert "gpt-daybreak-blue-latest" in catalog
+
+    def test_astra_supports_ultra(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        assert models.validate("gpt-6-astra", "ultra") is None
+
+    def test_daybreak_supports_ultra(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        assert models.validate("gpt-daybreak-blue-latest", "ultra") is None
+
+    def test_daybreak_display_name_is_carried_through(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        described = models.describe()
+        assert described["models"]["gpt-daybreak-blue-latest"]["display_name"] == (
+            "Daybreak Blue"
+        )
+
+    def test_gpt_reserve_is_still_hidden(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        assert "gpt-reserve" not in models.get_catalog()
+
+    def test_spark_effort_ceiling_is_enforced(self, monkeypatch):
+        # Spark tops out at xhigh even though the 5.6 family does not.
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        error = models.validate("gpt-5.3-codex-spark", "ultra")
+        assert "not supported by gpt-5.3-codex-spark" in error
+
+
+class TestLiveCatalogOutranksStaticTables:
+    """A slug the account can actually use must never be blocked by a constant.
+
+    gpt-5.3-codex-spark was on DEPRECATED_MODELS as "not available on this
+    account" while `codex debug models` listed it as available. Because the
+    deny-list was consulted before the catalog, the model was unreachable
+    through this server with a message that was simply false.
+    """
+
+    def test_a_live_listed_model_is_not_blocked_by_the_deny_list(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        monkeypatch.setitem(
+            models.DEPRECATED_MODELS, "gpt-5.3-codex-spark", "stale claim"
+        )
+        assert models.validate("gpt-5.3-codex-spark", "xhigh") is None
+
+    def test_a_live_listed_slug_is_not_blocked_by_the_alias_hint(self, monkeypatch):
+        # If OpenAI ever makes the bare alias resolve, the catalog says so
+        # first and the hint must get out of the way.
+        payload = {"models": [{
+            "slug": "gpt-5.6",
+            "display_name": "GPT-5.6",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [{"effort": "xhigh"}],
+            "visibility": "list",
+        }]}
+        _stub_codex(monkeypatch, json.dumps(payload))
+        assert models.validate("gpt-5.6", "xhigh") is None
+
+    def test_a_slug_absent_from_the_catalog_is_still_rejected(self, monkeypatch):
+        # The deny-list still earns its keep for genuinely dead slugs.
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0154))
+        error = models.validate("gpt-5.3-codex", "xhigh")
+        assert "deprecated" in error
+
+    def test_spark_is_no_longer_deny_listed(self):
+        assert "gpt-5.3-codex-spark" not in models.DEPRECATED_MODELS
+
+    def test_retired_54_family_is_deny_listed_with_a_replacement(self):
+        # Dropped from the live catalog in the 0.154.0 era. Naming a successor
+        # beats letting codex answer with a bare 400 twenty minutes in.
+        assert "gpt-5.6-luna" in models.DEPRECATED_MODELS["gpt-5.4-mini"]
+        assert "gpt-5.5" in models.DEPRECATED_MODELS["gpt-5.4"]
+
+
+class TestFallbackCatalogMatches0154:
+    def test_fallback_carries_the_current_generation(self):
+        assert "gpt-6-astra" in models.FALLBACK_CATALOG
+        assert "gpt-daybreak-blue-latest" in models.FALLBACK_CATALOG
+
+    def test_fallback_drops_the_retired_54_family(self):
+        assert "gpt-5.4" not in models.FALLBACK_CATALOG
+        assert "gpt-5.4-mini" not in models.FALLBACK_CATALOG
+
+    def test_fallback_and_deny_list_never_contradict_each_other(self):
+        # A slug in both tables is a bug: the fallback offers it while the
+        # deny-list refuses it, and which one wins depends on whether codex
+        # happened to be reachable.
+        overlap = set(models.FALLBACK_CATALOG) & set(models.DEPRECATED_MODELS)
+        assert overlap == set(), f"contradictory entries: {sorted(overlap)}"
+
+    def test_astra_and_daybreak_validate_offline(self, monkeypatch):
+        # With codex unreachable the fallback is all we have; the models the
+        # user actually runs must still pass validation.
+        monkeypatch.setattr(models.shutil, "which", lambda _: None)
+        assert models.validate("gpt-6-astra", "ultra") is None
+        assert models.validate("gpt-daybreak-blue-latest", "ultra") is None
+
+
+class TestModelDescriptions:
+    """Codex's own one-liner about each model, carried through to callers.
+
+    Routing advice that lives in this repo goes stale the moment OpenAI ships
+    a model. The catalog already says what each one is for; passing it along
+    is how a caller learns that Daybreak Blue is the defensive-security model
+    without anyone editing a table here.
+    """
+
+    def test_description_is_parsed_from_the_live_catalog(self, monkeypatch):
+        payload = {"models": [{
+            "slug": "gpt-daybreak-blue-latest",
+            "display_name": "Daybreak Blue",
+            "description": "Latest frontier agentic coding model for broad "
+                           "defensive cybersecurity work.",
+            "default_reasoning_level": "low",
+            "supported_reasoning_levels": [{"effort": "low"}],
+            "visibility": "list",
+        }]}
+        _stub_codex(monkeypatch, json.dumps(payload))
+        described = models.describe()
+        assert "defensive cybersecurity" in (
+            described["models"]["gpt-daybreak-blue-latest"]["description"]
+        )
+
+    def test_a_model_without_a_description_gets_an_empty_string(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE))
+        described = models.describe()
+        assert described["models"]["gpt-5.6-terra"]["description"] == ""
+
+    def test_every_fallback_entry_carries_one(self):
+        missing = [
+            slug for slug, entry in models.FALLBACK_CATALOG.items()
+            if not entry.get("description")
+        ]
+        assert missing == [], f"no description for: {missing}"

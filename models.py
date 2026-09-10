@@ -7,7 +7,7 @@ Reading the catalog live means new models work without a code change, and
 deprecated ones are caught before we spend 20 minutes on a doomed run.
 
 Effort validity is per-model — gpt-5.6-luna supports `max` but not `ultra`,
-and the 5.4/5.5 family supports neither.
+and gpt-5.5 / gpt-5.3-codex-spark support neither.
 """
 
 import json
@@ -16,46 +16,71 @@ import shutil
 import subprocess
 import time
 
-# Verified against codex-cli 0.144.4 on 2026-07-15 via `codex debug models`.
+# Verified against codex-cli 0.154.0 on 2026-09-10 via `codex debug models`.
 # Only used when the live query fails (codex missing, offline, format change).
+#
+# Entries here are a last-known-good snapshot, never an allow-list: the live
+# catalog is always preferred, and `validate` lets unknown slugs through.
 FALLBACK_CATALOG = {
+    "gpt-6-astra": {
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "default_effort": "medium",
+        "display_name": "GPT-6-Astra",
+        "description": "Our most capable model for complex, demanding work.",
+    },
     "gpt-5.6-sol": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "low",
         "display_name": "GPT-5.6-Sol",
+        "description": "Frontier model for ambiguous, high-value work.",
     },
     "gpt-5.6-terra": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "medium",
         "display_name": "GPT-5.6-Terra",
+        "description": "Pragmatic all-rounder for everyday engineering.",
     },
     "gpt-5.6-luna": {
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "medium",
         "display_name": "GPT-5.6-Luna",
+        "description": "Fast model for extraction, classification, and structured summaries.",
+    },
+    # Access-gated: present only on accounts approved for it, so it is absent
+    # from most live catalogs. Listing it here is harmless — the fallback is
+    # only consulted when the live query fails, and unknown-to-the-account
+    # slugs are rejected by codex itself, not by us.
+    "gpt-daybreak-blue-latest": {
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "default_effort": "low",
+        "display_name": "Daybreak Blue",
+        "description": "Latest frontier agentic coding model for broad defensive cybersecurity work.",
     },
     "gpt-5.5": {
         "efforts": ["low", "medium", "high", "xhigh"],
         "default_effort": "medium",
         "display_name": "GPT-5.5",
+        "description": "Previous-generation all-rounder.",
     },
-    "gpt-5.4": {
+    "gpt-5.3-codex-spark": {
         "efforts": ["low", "medium", "high", "xhigh"],
-        "default_effort": "medium",
-        "display_name": "GPT-5.4",
-    },
-    "gpt-5.4-mini": {
-        "efforts": ["low", "medium", "high", "xhigh"],
-        "default_effort": "medium",
-        "display_name": "GPT-5.4-mini",
+        "default_effort": "high",
+        "display_name": "GPT-5.3-Codex-Spark",
+        "description": "Ultra-fast coding model.",
     },
 }
 
 # Known-dead slugs, so we can fail with a useful message instead of a raw 400.
+#
+# This is a hint of last resort, not an authority: `validate` consults the live
+# catalog first and lets anything listed there through. A slug that OpenAI
+# brings back — gpt-5.3-codex-spark was on this list while being live-listed
+# and account-available — must not stay blocked by a stale constant.
 DEPRECATED_MODELS = {
     "gpt-5.3-codex": "Deprecated by OpenAI for ChatGPT-account auth. Use gpt-5.6-terra.",
     "gpt-5.2": "Deprecated by OpenAI for ChatGPT-account auth. Use gpt-5.6-terra.",
-    "gpt-5.3-codex-spark": "Not available on this account. Use gpt-5.6-sol.",
+    "gpt-5.4": "Retired from the ChatGPT-account catalog. Use gpt-5.5 or gpt-5.6-terra.",
+    "gpt-5.4-mini": "Retired from the ChatGPT-account catalog. Use gpt-5.6-luna.",
 }
 
 # The bare alias resolves only under API-key auth; this server uses ChatGPT auth.
@@ -121,6 +146,12 @@ def _query_catalog(codex_home: str | None = None) -> dict | None:
             "efforts": efforts,
             "default_effort": entry.get("default_reasoning_level") or efforts[0],
             "display_name": entry.get("display_name") or slug,
+            # Codex's own one-line summary of what the model is for. Carried
+            # through so routing advice comes from the catalog rather than from
+            # a table in this repo that goes stale the moment OpenAI ships
+            # something — it is how a caller learns that Daybreak Blue is the
+            # defensive-security model and Spark the ultra-fast one.
+            "description": entry.get("description") or "",
         }
 
     return catalog or None
@@ -163,19 +194,27 @@ def validate(model: str, effort: str, codex_home: str | None = None) -> str | No
     Unknown models are allowed through with no error — the catalog may be newer
     than this code, and blocking an unrecognized slug would recreate the very
     rot problem the live catalog exists to solve. Known-dead slugs are rejected.
+
+    The live catalog outranks both static tables. A slug the account can
+    actually use is never blocked by DEPRECATED_MODELS or ALIAS_HINTS, because
+    those constants rot in exactly the direction that hurts: gpt-5.3-codex-spark
+    sat on the deny-list, unreachable, while `codex debug models` listed it as
+    available. Only consult them for slugs the live catalog does not know.
     """
-    if model in DEPRECATED_MODELS:
-        return f"Model '{model}' is deprecated: {DEPRECATED_MODELS[model]}"
-
-    if model in ALIAS_HINTS:
-        return (
-            f"'{model}' is an alias that does not resolve under ChatGPT-account auth. "
-            f"Use the full slug, e.g. '{ALIAS_HINTS[model]}'."
-        )
-
     catalog = get_catalog(codex_home)
     entry = catalog.get(model)
+
     if entry is None:
+        if model in DEPRECATED_MODELS:
+            return f"Model '{model}' is deprecated: {DEPRECATED_MODELS[model]}"
+
+        if model in ALIAS_HINTS:
+            return (
+                f"'{model}' is an alias that does not resolve under "
+                f"ChatGPT-account auth. Use the full slug, e.g. "
+                f"'{ALIAS_HINTS[model]}'."
+            )
+
         # Unknown but not known-dead: allow. Codex itself is the final authority.
         return None
 
@@ -196,6 +235,7 @@ def describe(codex_home: str | None = None) -> dict:
         "models": {
             slug: {
                 "display_name": entry["display_name"],
+                "description": entry.get("description", ""),
                 "efforts": entry["efforts"],
                 "default_effort": entry["default_effort"],
             }

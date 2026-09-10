@@ -5,6 +5,69 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-09-10
+
+Compatibility pass against **codex-cli 0.154.0**, and support for the models
+that shipped with it.
+
+### Added
+
+- **GPT-6 Astra (`gpt-6-astra`)** — OpenAI's most capable model, for complex,
+  demanding work. Supports every effort up to `ultra`.
+- **Daybreak Blue (`gpt-daybreak-blue-latest`)** — the frontier agentic coding
+  model for broad defensive cybersecurity work. It is access-gated, so it
+  appears in the catalog only on accounts approved for it, and the delegation
+  skill now routes security reviews and hardening work to it when present.
+- **`gpt-5.3-codex-spark`** is selectable again — see Fixed. It is the
+  ultra-fast tier, for small, mechanical, fully specified edits.
+- **Each model's own description is carried through to `codex_models`.** Routing
+  advice now comes from the live catalog rather than from a table in this repo
+  that goes stale whenever OpenAI ships something.
+- Model aliases for `/codex:delegate`: `astra`, `daybreak`, and `spark` join
+  `sol`, `terra`, and `luna`.
+
+### Fixed
+
+- **Out-of-quota runs were reported as unknown failures.** codex-cli 0.154.0
+  states it in prose — "You've hit your usage limit … or try again at
+  `<date>`" — with no `usage_limit_reached` code and no HTTP 429. The
+  classifier matched only the older machine-readable spellings, so a plain
+  out-of-quota job raised a generic `codex_error` and dropped the advice that
+  is the entire point of a typed rate-limit error: switch to a cheaper model,
+  lower the effort, or wait for the reset. The reset time is now read from
+  either wording, and quoted back with codex's own capitalization.
+- **A live model could be blocked by a stale constant.** `validate` consulted
+  the built-in deny-list *before* the catalog, so `gpt-5.3-codex-spark` was
+  unreachable through this server — rejected as "not available on this
+  account" while `codex debug models` listed it as available. The live catalog
+  now outranks both `DEPRECATED_MODELS` and `ALIAS_HINTS`; those tables are
+  consulted only for slugs the catalog does not know. This is the same rot the
+  live catalog was introduced to solve, arriving from the other direction.
+- **A standalone `error` event is now read.** Codex usually emits one alongside
+  `turn.failed`, but not always. When it was the only structured account of a
+  failure, classification fell through to stderr — a stream shared with every
+  MCP server in the user's codex config, where a bystander's routine `HTTP 401`
+  reads exactly like an expired session. A real `turn.failed` still outranks it.
+
+### Changed
+
+- The fallback catalog is refreshed to the 0.154.0 generation. `gpt-5.4` and
+  `gpt-5.4-mini` have been retired from the ChatGPT-account catalog and now
+  fail with a pointer to a live model instead of a bare HTTP 400.
+- 323 tests, up from 292.
+
+### Verified against codex-cli 0.154.0
+
+Re-checked rather than assumed, since these are the assumptions the server is
+built on. Unchanged: `codex exec` still accepts `--sandbox`, `--color`,
+`-C/--cd`, `--skip-git-repo-check`, `--json`, `-o`, and `--output-schema`;
+`codex exec resume` still rejects `--sandbox`, `--color`, and `-C/--cd`, so
+sandbox on a resume still goes through `-c sandbox_mode=`; `-c` values are
+still parsed as TOML; and the `--json` event stream still emits
+`thread.started`, `turn.completed`, `turn.failed`, and `item.completed` with
+the item types the progress phases key off. A live end-to-end `codex exec` run
+confirmed the stream shape rather than the help text alone.
+
 ## [2.1.1] — 2026-08-10
 
 ### Fixed

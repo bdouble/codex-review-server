@@ -560,11 +560,13 @@ def codex_models() -> str:
 
     Read live from the Codex CLI, so it reflects reality rather than this
     server's assumptions — including models released after this server was
-    written. Effort support is per-model: gpt-5.6-luna has no "ultra", and the
-    5.4/5.5 family tops out at "xhigh".
+    written, and access-gated ones such as gpt-daybreak-blue-latest that exist
+    only on approved accounts. Effort support is per-model: gpt-5.6-luna has no
+    "ultra", and gpt-5.5 / gpt-5.3-codex-spark top out at "xhigh".
 
     Returns:
-        JSON catalog with efforts, defaults, and known-deprecated slugs.
+        JSON catalog with each model's description, efforts and default
+        effort, plus known-deprecated slugs.
     """
     catalog = models.describe(Config.CODEX_HOME)
     catalog["configured_default"] = {
