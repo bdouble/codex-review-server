@@ -5,6 +5,37 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-09-23
+
+Support for **GPT-6 Sol** and **GPT-6 Luna**, verified against **codex-cli
+0.156.1**, and a preference for Daybreak on accounts that have it.
+
+### Added
+
+- **GPT-6 Sol (`gpt-6-sol`)** — the workhorse for coding and everyday work,
+  every effort up to `ultra`. **GPT-6 Luna (`gpt-6-luna`)** — fast and
+  affordable, up to `max` (no `ultra`). Both need codex-cli 0.156 or newer;
+  0.154.0 does not list them, so run `codex update`.
+- **Daybreak is preferred when the account has it.** A request that names no
+  model runs on the Daybreak model in the account's *live* catalog, ahead of
+  `CODEX_MODEL`. The static fallback never triggers it, because it lists
+  Daybreak for every account. `CODEX_PREFER_DAYBREAK=false` turns it off, and
+  an explicit `model` always wins. `codex_models` reports the effective default.
+
+### Changed
+
+- **Default is now `gpt-6-sol` at `high`** (was `gpt-5.6-terra` at `xhigh`).
+- `/codex:delegate` aliases `sol` and `luna` now mean the GPT-6 models;
+  the 5.6 ones remain reachable by full slug. The delegation skill routes to
+  GPT-6 and leaves `model` unset when Daybreak is the default.
+- Quota-exhaustion advice points at `gpt-6-luna`.
+
+### Removed
+
+- **`gpt-5.3-codex-spark`** is retired for ChatGPT accounts: 0.156.1 no longer
+  lists it and a live run returns HTTP 400. It is back on the deny-list, with
+  `gpt-6-luna` as the suggested replacement, and the `spark` alias is gone.
+
 ## [2.2.0] — 2026-09-10
 
 Compatibility pass against **codex-cli 0.154.0**, and support for the models

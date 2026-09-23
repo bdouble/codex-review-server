@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config
 import jobs
+import models
 import server as server_module
 import verify
 from server import (
@@ -40,9 +41,13 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "_overridden", {})
     for key in (
         "CODEX_MODEL", "CODEX_EFFORT", "CODEX_REVIEW_MODEL",
-        "CODEX_REVIEW_REASONING", "CODEX_TIMEOUT",
+        "CODEX_REVIEW_REASONING", "CODEX_TIMEOUT", "CODEX_PREFER_DAYBREAK",
     ):
         monkeypatch.delenv(key, raising=False)
+    # Pin the catalog to the static fallback. The live one differs per account
+    # (only some list Daybreak), and the default model depends on it.
+    models._cache.clear()
+    monkeypatch.setattr(models, "_query_catalog", lambda codex_home=None: None)
     monkeypatch.setattr(server_module, "_spawn_worker", lambda job_id: None)
     monkeypatch.setattr(server_module, "find_codex_binary", lambda: "/usr/bin/codex")
     # Tests simulate a live worker with their own pid; let the identity check
@@ -122,8 +127,8 @@ class TestDelegateLaunch:
 
     def test_uses_configured_default_model(self, project):
         result = _call(codex_delegate, task="do x", project_dir=project)
-        assert result["model"] == "gpt-5.6-terra"
-        assert result["effort"] == "xhigh"
+        assert result["model"] == "gpt-6-sol"
+        assert result["effort"] == "high"
 
     def test_model_override(self, project):
         result = _call(
@@ -399,9 +404,77 @@ class TestReviewTools:
 class TestModelsTool:
     def test_lists_models_and_configured_default(self):
         result = _call(codex_models)
-        assert "gpt-5.6-terra" in result["models"]
-        assert result["configured_default"]["model"] == "gpt-5.6-terra"
+        assert "gpt-6-sol" in result["models"]
+        assert result["configured_default"]["model"] == "gpt-6-sol"
         assert "gpt-5.3-codex" in result["deprecated"]
+
+    def test_configured_default_reports_daybreak_when_preferred(self, daybreak_account):
+        result = _call(codex_models)
+        assert result["configured_default"]["model"] == "gpt-daybreak-blue-latest"
+
+
+def _live_catalog(*slugs):
+    return {
+        slug: {
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+            "default_effort": "medium",
+            "display_name": slug,
+            "description": "",
+        }
+        for slug in slugs
+    }
+
+
+@pytest.fixture
+def daybreak_account(monkeypatch):
+    """An account whose live catalog lists a Daybreak model."""
+    models._cache.clear()
+    monkeypatch.setattr(
+        models, "_query_catalog",
+        lambda codex_home=None: _live_catalog(
+            "gpt-6-astra", "gpt-6-sol", "gpt-daybreak-blue-latest"
+        ),
+    )
+
+
+class TestDaybreakPreference:
+    """Accounts approved for a Daybreak model run on it unless told otherwise."""
+
+    def test_daybreak_replaces_the_default_when_listed(self, project, daybreak_account):
+        result = _call(codex_delegate, task="do x", project_dir=project)
+        assert result["model"] == "gpt-daybreak-blue-latest"
+        assert result["effort"] == "high"
+
+    def test_applies_to_reviews_too(self, project, daybreak_account):
+        result = _call(codex_review, project_dir=project)
+        assert result["model"] == "gpt-daybreak-blue-latest"
+
+    def test_explicit_model_wins(self, project, daybreak_account):
+        result = _call(
+            codex_delegate, task="do x", project_dir=project, model="gpt-6-astra"
+        )
+        assert result["model"] == "gpt-6-astra"
+
+    def test_configured_model_used_when_account_lacks_daybreak(self, project, monkeypatch):
+        models._cache.clear()
+        monkeypatch.setattr(
+            models, "_query_catalog",
+            lambda codex_home=None: _live_catalog("gpt-6-sol", "gpt-6-luna"),
+        )
+        result = _call(codex_delegate, task="do x", project_dir=project)
+        assert result["model"] == "gpt-6-sol"
+
+    def test_fallback_catalog_never_selects_daybreak(self, project):
+        # The fallback lists Daybreak for everyone; trusting it would send an
+        # unapproved account to a model codex refuses.
+        assert "gpt-daybreak-blue-latest" in models.FALLBACK_CATALOG
+        result = _call(codex_delegate, task="do x", project_dir=project)
+        assert result["model"] == "gpt-6-sol"
+
+    def test_can_be_turned_off(self, project, daybreak_account, monkeypatch):
+        monkeypatch.setenv("CODEX_PREFER_DAYBREAK", "false")
+        result = _call(codex_delegate, task="do x", project_dir=project)
+        assert result["model"] == "gpt-6-sol"
 
 
 class TestErrorClassification:

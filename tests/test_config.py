@@ -26,9 +26,19 @@ def env_file(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "_ENV_FILE", path)
     monkeypatch.setattr(config, "_overridden", {})
     for key in ("CODEX_MODEL", "CODEX_EFFORT", "CODEX_REVIEW_MODEL",
-                "CODEX_REVIEW_REASONING", "CODEX_TIMEOUT"):
+                "CODEX_REVIEW_REASONING", "CODEX_TIMEOUT", "CODEX_PREFER_DAYBREAK"):
         monkeypatch.delenv(key, raising=False)
     return path
+
+
+class TestPreferDaybreak:
+    def test_on_by_default(self, env_file):
+        assert config.Config.PREFER_DAYBREAK is True
+
+    @pytest.mark.parametrize("value", ["false", "0", "no", "off", "FALSE"])
+    def test_falsy_values_turn_it_off(self, env_file, value):
+        env_file.write_text(f"CODEX_PREFER_DAYBREAK={value}\n")
+        assert config.Config.PREFER_DAYBREAK is False
 
 
 class TestLiveReload:

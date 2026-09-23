@@ -19,13 +19,14 @@ values).
 
 Worth calling out to the user when relevant:
 
-- **Effort support is per-model.** `gpt-5.6-luna` has no `ultra`; `gpt-5.5` and
-  `gpt-5.3-codex-spark` top out at `xhigh`. Asking for an unsupported effort is
+- **Effort support is per-model.** The Luna models have no `ultra`; `gpt-5.5`
+  tops out at `xhigh`. Asking for an unsupported effort is
   rejected up front rather than failing mid-run.
 - **`ultra` coordinates several agents in parallel** — substantially slower and
   costlier, worth it only for genuinely hard problems.
 - **The catalog is per-account.** Access-gated models such as
   `gpt-daybreak-blue-latest`, the defensive-security model, appear only where
-  they have been approved. A model missing from the list is not a bug.
+  they have been approved. A model missing from the list is not a bug. When
+  one is listed, it is also the default for any request that names no model.
 - **Use the full slug.** The bare `gpt-5.6` alias does not resolve under
   ChatGPT-account auth.

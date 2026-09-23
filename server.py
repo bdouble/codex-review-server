@@ -137,9 +137,23 @@ def _conflict_message(conflict: dict, project_dir: str, write: bool) -> str:
     )
 
 
+def _default_model() -> str:
+    """The model for a request that names none.
+
+    A Daybreak model on the account outranks CODEX_MODEL: it is the
+    security-aware variant, and an account only has it because it was
+    approved for it. CODEX_PREFER_DAYBREAK=false turns that off.
+    """
+    if Config.PREFER_DAYBREAK:
+        daybreak = models.preferred_daybreak(Config.CODEX_HOME)
+        if daybreak:
+            return daybreak
+    return Config.MODEL
+
+
 def _resolve_settings(model: str, effort: str) -> tuple[str, str, str | None]:
     """Resolve model/effort against config and the live catalog."""
-    chosen_model = model or Config.MODEL
+    chosen_model = model or _default_model()
     chosen_effort = effort or Config.EFFORT
     error = models.validate(chosen_model, chosen_effort, Config.CODEX_HOME)
     return chosen_model, chosen_effort, error
@@ -298,10 +312,11 @@ def codex_delegate(
         task: The complete task. Be specific about what "done" means — Codex
             cannot ask clarifying questions mid-run.
         project_dir: Absolute path to the working directory.
-        model: Model slug (e.g. "gpt-5.6-sol"). Defaults to CODEX_MODEL.
-            Call codex_models for the live catalog.
+        model: Model slug (e.g. "gpt-6-sol"). Defaults to the account's
+            Daybreak model when it has one, else CODEX_MODEL. Call
+            codex_models for the live catalog.
         effort: low|medium|high|xhigh|max|ultra. Defaults to CODEX_EFFORT.
-            "ultra" (Sol/Terra only) runs four agents in parallel — slow, for
+            "ultra" (not on Luna or 5.5) runs four agents in parallel — slow, for
             genuinely hard problems.
         write: True to allow file edits (workspace-write). Default read-only.
         context: Background Codex should have — constraints, prior findings,
@@ -561,8 +576,8 @@ def codex_models() -> str:
     Read live from the Codex CLI, so it reflects reality rather than this
     server's assumptions — including models released after this server was
     written, and access-gated ones such as gpt-daybreak-blue-latest that exist
-    only on approved accounts. Effort support is per-model: gpt-5.6-luna has no
-    "ultra", and gpt-5.5 / gpt-5.3-codex-spark top out at "xhigh".
+    only on approved accounts. Effort support is per-model: the Luna models have no
+    "ultra", and gpt-5.5 tops out at "xhigh".
 
     Returns:
         JSON catalog with each model's description, efforts and default
@@ -570,7 +585,7 @@ def codex_models() -> str:
     """
     catalog = models.describe(Config.CODEX_HOME)
     catalog["configured_default"] = {
-        "model": Config.MODEL,
+        "model": _default_model(),
         "effort": Config.EFFORT,
     }
     return json.dumps(catalog, indent=2)
@@ -601,7 +616,8 @@ def codex_review(
         base_branch: Branch or commit to compare against (default: "main").
         focus: "bugs", "security", "performance", or "all".
         context: Additional context (ticket description, acceptance criteria).
-        model: Model slug. Defaults to CODEX_MODEL.
+        model: Model slug. Defaults to the account's Daybreak model when it
+            has one, else CODEX_MODEL.
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
 
@@ -644,7 +660,8 @@ def codex_review_and_fix(
         base_branch: Branch or commit to compare against (default: "main").
         focus: "bugs", "security", "performance", or "all".
         context: Additional context (ticket description, acceptance criteria).
-        model: Model slug. Defaults to CODEX_MODEL.
+        model: Model slug. Defaults to the account's Daybreak model when it
+            has one, else CODEX_MODEL.
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         verify_command: Shell command to run afterwards (e.g. "pytest -q").
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
@@ -684,7 +701,8 @@ def codex_fix(
         project_dir: Absolute path to the project repository.
         findings: The findings to fix (from codex_review, filtered by the user).
         context: Guidance on approach, constraints, or preferences.
-        model: Model slug. Defaults to CODEX_MODEL.
+        model: Model slug. Defaults to the account's Daybreak model when it
+            has one, else CODEX_MODEL.
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         verify_command: Shell command to run afterwards (e.g. "pytest -q").
         timeout: Seconds. Defaults to CODEX_TIMEOUT.

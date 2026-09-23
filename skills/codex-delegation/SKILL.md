@@ -1,6 +1,6 @@
 ---
 name: codex-delegation
-description: "Delegate work to OpenAI Codex from Claude Code and manage it to completion. Use when the user says delegate/hand off/farm out to Codex, asks for a second model's opinion or a cross-model review, wants several tasks run in parallel, or mentions codex_delegate / GPT-5.6 / Sol / Terra / Luna. Also read this before choosing a Codex model or reasoning effort, before sending a follow-up to an existing Codex job, and before reporting what a Codex job did."
+description: "Delegate work to OpenAI Codex from Claude Code and manage it to completion. Use when the user says delegate/hand off/farm out to Codex, asks for a second model's opinion or a cross-model review, wants several tasks run in parallel, or mentions codex_delegate / GPT-6 / GPT-5.6 / Astra / Sol / Terra / Luna / Daybreak. Also read this before choosing a Codex model or reasoning effort, before sending a follow-up to an existing Codex job, and before reporting what a Codex job did."
 ---
 
 # Delegating to Codex
@@ -37,25 +37,31 @@ Don't ask the user — choose, then say what you chose and why.
 
 | Task | Model | Effort |
 |---|---|---|
-| Small, mechanical, fully specified edits | `gpt-5.3-codex-spark` | `low`–`medium` |
-| Extraction, classification, structured summaries | `gpt-5.6-luna` | `low`–`medium` |
-| Ordinary engineering: implement, fix, refactor, test | `gpt-5.6-terra` | `high`–`xhigh` |
-| Code review | `gpt-5.6-terra` | `xhigh` |
+| Extraction, classification, structured summaries, easy tasks | `gpt-6-luna` | `low`–`medium` |
+| Ordinary engineering: implement, fix, refactor, test | `gpt-6-sol` | `high`–`xhigh` |
+| Code review | `gpt-6-sol` | `high`–`xhigh` |
 | Security review, vulnerability hunting, hardening | `gpt-daybreak-blue-latest` | `high`–`xhigh` |
-| Ambiguous, high-value, or genuinely hard problems | `gpt-5.6-sol` | `xhigh`–`max` |
+| Ambiguous, high-value, or genuinely hard problems | `gpt-6-sol` | `xhigh`–`max` |
 | Complex, demanding work where you want the best model | `gpt-6-astra` | `high`–`max` |
-| Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-5.6-sol` | `ultra` |
+| Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-6-sol` | `ultra` |
+
+**Prefer Daybreak when the account has it.** If `codex_models` reports a
+Daybreak model as `configured_default.model`, leave `model` unset for anything
+you would otherwise send to Sol or Terra — engineering, review, and security
+work. The server runs it on Daybreak, the security-aware variant. Naming a
+model explicitly bypasses that, so do it only for Luna-tier work or when you
+specifically want Astra.
 
 Constraints that are enforced, not advisory:
 
-- **Effort validity is per-model.** `gpt-5.6-luna` has no `ultra`. `gpt-5.5`
-  and `gpt-5.3-codex-spark` top out at `xhigh` — no `max`, no `ultra`.
+- **Effort validity is per-model.** The Luna models have no `ultra`. `gpt-5.5`
+  tops out at `xhigh` — no `max`, no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
-- **Sol and Daybreak are strong at low effort.** Start lower than instinct
-  suggests; their own default is `low`.
+- **Daybreak and 5.6 Sol are strong at low effort.** Start lower than
+  instinct suggests; their own default is `low`.
 - **Daybreak Blue is access-gated.** It is the defensive-security model, and it
   exists only on approved accounts. Check `codex_models` before routing to it,
-  and fall back to `gpt-5.6-terra` if the catalog does not list it.
+  and fall back to `gpt-6-sol` if the catalog does not list it.
 - **Always use the full slug.** Bare `gpt-5.6` fails under ChatGPT auth, and
   Daybreak's slug really does end in `-latest`.
 
@@ -164,7 +170,7 @@ that field, not on the prose, which is written for the user and will change.
 
 | `error_type` | Meaning | Response |
 |---|---|---|
-| `rate_limit`, message says *quota exhausted* | Out of quota | Drop to `gpt-5.6-luna` or a lower effort, or wait for the reset in the message |
+| `rate_limit`, message says *quota exhausted* | Out of quota | Drop to `gpt-6-luna` or a lower effort, or wait for the reset in the message |
 | `rate_limit`, message says *rate limited* | Transient throttle | Retry shortly |
 | `auth_error` | Session expired | The user runs `codex login` — you cannot do it for them |
 | `codex_not_found` | CLI not installed | `npm i -g @openai/codex` |

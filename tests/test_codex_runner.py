@@ -113,7 +113,7 @@ class TestClassifyFailure:
         assert not isinstance(excinfo.value, CodexRateLimitError)
 
     def test_quota_exhaustion_suggests_cheaper_model(self):
-        with pytest.raises(CodexRateLimitError, match="gpt-5.6-luna"):
+        with pytest.raises(CodexRateLimitError, match="gpt-6-luna"):
             _classify_failure('{"error":"usage_limit_reached"}', "", 1)
 
     def test_quota_reset_time_is_surfaced(self):
@@ -381,7 +381,7 @@ class TestUsageLimitWordingFromCodex0154:
             _classify_failure("", self.LIVE_MESSAGE, 1)
 
     def test_live_wording_suggests_a_cheaper_model(self):
-        with pytest.raises(CodexRateLimitError, match="gpt-5.6-luna"):
+        with pytest.raises(CodexRateLimitError, match="gpt-6-luna"):
             _classify_failure("", self.LIVE_MESSAGE, 1)
 
     def test_prose_reset_time_is_surfaced(self):
