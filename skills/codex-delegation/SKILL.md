@@ -45,12 +45,11 @@ Don't ask the user — choose, then say what you chose and why.
 | Complex, demanding work where you want the best model | `gpt-6-astra` | `high`–`max` |
 | Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-6-sol` | `ultra` |
 
-**Prefer Daybreak when the account has it.** If `codex_models` reports a
-Daybreak model as `configured_default.model`, leave `model` unset for anything
-you would otherwise send to Sol or Terra — engineering, review, and security
-work. The server runs it on Daybreak, the security-aware variant. Naming a
-model explicitly bypasses that, so do it only for Luna-tier work or when you
-specifically want Astra.
+**Daybreak builds are applied for you.** On an approved account the server
+runs `gpt-5.6-sol` as `gpt-daybreak-blue-latest`, the same snapshot under the
+Daybreak cyber program. Don't swap GPT-6 work to Daybreak to "get security
+awareness": the Daybreak slug is a generation behind `gpt-6-sol`. Name it
+explicitly only for security work, as the table says.
 
 Constraints that are enforced, not advisory:
 

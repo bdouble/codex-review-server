@@ -429,24 +429,26 @@ class TestCodex0156Catalog:
         assert "ultra" not in models.FALLBACK_CATALOG["gpt-6-luna"]["efforts"]
 
 
-class TestPreferredDaybreak:
+class TestDaybreakVariant:
     def test_found_in_a_live_catalog(self, monkeypatch):
         _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
-        assert models.preferred_daybreak() == "gpt-daybreak-blue-latest"
+        assert models.daybreak_variant("gpt-5.6-sol") == "gpt-daybreak-blue-latest"
+
+    def test_gpt6_sol_has_none_reachable_through_exec(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
+        assert models.daybreak_variant("gpt-6-sol") is None
 
     def test_none_when_the_account_lacks_it(self, monkeypatch):
-        _stub_codex(monkeypatch, json.dumps(SAMPLE))
-        assert models.preferred_daybreak() is None
+        payload = {"models": [_entry("gpt-5.6-sol", _ALL)]}
+        _stub_codex(monkeypatch, json.dumps(payload))
+        assert models.daybreak_variant("gpt-5.6-sol") is None
 
     def test_never_taken_from_the_fallback(self, monkeypatch):
         # The fallback lists Daybreak for every account, approved or not.
         monkeypatch.setattr(models.shutil, "which", lambda _: None)
-        assert models.preferred_daybreak() is None
+        assert models.daybreak_variant("gpt-5.6-sol") is None
 
-    def test_first_listed_wins(self, monkeypatch):
-        payload = {"models": [
-            _entry("gpt-daybreak-green", _ALL),
-            _entry("gpt-daybreak-blue-latest", _ALL),
-        ]}
-        _stub_codex(monkeypatch, json.dumps(payload))
-        assert models.preferred_daybreak() == "gpt-daybreak-green"
+    def test_every_variant_is_in_the_fallback_catalog(self):
+        for base, variant in models.DAYBREAK_VARIANTS.items():
+            assert base in models.FALLBACK_CATALOG
+            assert variant in models.FALLBACK_CATALOG

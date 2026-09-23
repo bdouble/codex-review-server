@@ -59,14 +59,20 @@ Durable capability tiers rather than a version list:
 | `gpt-6-astra` | Frontier intelligence for the most demanding work. | low → xhigh, `max`, `ultra` |
 | `gpt-6-sol` | The workhorse for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
 | `gpt-6-luna` | Fast and affordable, for easier tasks. | low → xhigh, `max` |
-| `gpt-daybreak-blue-latest` | Security-aware; defensive cybersecurity work. Access-gated. | low → xhigh, `max`, `ultra` |
+| `gpt-daybreak-blue-latest` | `gpt-5.6-sol` under the Daybreak Blue cyber program; defensive security work. Access-gated. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-sol` / `gpt-5.6-terra` | Previous generation. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-luna` | Previous generation, fast. | low → xhigh, `max` |
 | `gpt-5.5` | Older generation. | low → xhigh |
 
-Default: **`gpt-6-sol` at `high`** — or, on an account whose live catalog
-lists a Daybreak model, **that Daybreak model at `high`**. Naming a model on a
-call always wins; `CODEX_PREFER_DAYBREAK=false` turns the preference off.
+Default: **`gpt-6-sol` at `high`**.
+
+**Daybreak builds are preferred.** On an account approved for Daybreak Blue,
+a job on a model that has a Daybreak build runs as that build. Today that means
+`gpt-5.6-sol` runs as `gpt-daybreak-blue-latest`, which OpenAI documents as the
+same snapshot under the Daybreak program. `gpt-6-sol` is left alone, because
+`codex exec` cannot reach a Daybreak build of it: the Codex desktop app applies
+Daybreak to most models per turn, but only over the app-server protocol, and
+`exec` has no equivalent. `CODEX_PREFER_DAYBREAK=false` turns the swap off.
 
 GPT-6 Sol and Luna need **codex-cli 0.156 or newer**; older CLIs don't list
 them. Run `codex update`.
@@ -281,7 +287,7 @@ a restart.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CODEX_MODEL` | `gpt-6-sol` | Default model slug |
-| `CODEX_PREFER_DAYBREAK` | `true` | Use the account's Daybreak model, when listed live, for calls that name no model |
+| `CODEX_PREFER_DAYBREAK` | `true` | Run a model as its Daybreak build when the account's live catalog has one |
 | `CODEX_EFFORT` | `high` | Default reasoning effort |
 | `CODEX_TIMEOUT` | `4500` | Per-job timeout, seconds |
 | `CODEX_FOCUS` | `all` | Review focus: `bugs`, `security`, `performance`, `all` |

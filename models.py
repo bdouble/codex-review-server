@@ -96,6 +96,18 @@ ALIAS_HINTS = {
     "gpt-5.6-codex": "gpt-5.6-terra",
 }
 
+# The Daybreak build of each base model that `codex exec` can reach, keyed by
+# that base. Daybreak Blue is really an access program that covers most of the
+# catalog, but only the app-server protocol can apply it to an arbitrary model
+# (`turn/start.cyberAccessProgram`); `exec` has no flag or config key for it.
+# Under exec, the dedicated slug is the only route, and it is one specific model:
+# per developers.openai.com, gpt-daybreak-blue-latest points at the gpt-5.6-sol
+# snapshot (checked 2026-09-23). The catalog does not say this, and `-latest`
+# moves, so re-check it after each CLI upgrade.
+DAYBREAK_VARIANTS = {
+    "gpt-5.6-sol": "gpt-daybreak-blue-latest",
+}
+
 _CACHE_TTL_SECONDS = 300
 # Keyed by codex_home: different ChatGPT accounts have different catalogs, and
 # CODEX_HOME_DIR is live-reloaded, so a single shared slot would serve one
@@ -234,19 +246,20 @@ def validate(model: str, effort: str, codex_home: str | None = None) -> str | No
     return None
 
 
-def preferred_daybreak(codex_home: str | None = None) -> str | None:
-    """The Daybreak model this account can use, or None.
+def daybreak_variant(model: str, codex_home: str | None = None) -> str | None:
+    """The Daybreak build of `model` this account can use, or None.
 
-    Daybreak models are access-gated security-aware variants; when an account
-    has one, requests that name no model run on it. Only a live catalog can
-    answer this — FALLBACK_CATALOG lists Daybreak for every account, so
-    trusting it would route unapproved accounts to a model codex rejects.
-    Codex lists models in priority order, so the first match is the one to use.
+    Only a live catalog can answer this. FALLBACK_CATALOG lists Daybreak for
+    every account, so trusting it would send unapproved accounts to a model
+    codex rejects.
     """
-    catalog = get_catalog(codex_home)
-    if catalog_source() != "live":
+    variant = DAYBREAK_VARIANTS.get(model)
+    if variant is None:
         return None
-    return next((slug for slug in catalog if slug.startswith("gpt-daybreak")), None)
+    catalog = get_catalog(codex_home)
+    if catalog_source() != "live" or variant not in catalog:
+        return None
+    return variant
 
 
 def describe(codex_home: str | None = None) -> dict:

@@ -111,6 +111,16 @@ before assuming.
   `ultra` exits 0), so our up-front check is the only guard. `codex debug models` is
   the authority, and it is per-account: the access-gated
   `gpt-daybreak-blue-latest` appears only where it has been approved.
+- **Daybreak is an access program, not just a slug.** The catalog's
+  `available_access_programs.cyber` lists `daybreak_blue` on nearly every model.
+  The desktop app applies it per turn via app-server
+  `turn/start.cyberAccessProgram` (its `[desktop.daybreak-enabled]` toggle).
+  `exec` has no flag or config key for it, and `-c cyber_access_program=...` is
+  silently ignored. Under `exec`, only the `gpt-daybreak-blue-latest` slug gets
+  Daybreak, and it is `gpt-5.6-sol` (developers.openai.com model page). The
+  catalog does not say which base it uses and `-latest` moves, so re-check
+  `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red automatically: it is a
+  separate, offensive-security approval.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.
@@ -135,7 +145,7 @@ All optional; configured in `.env` (see `.env.example`). The older
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `CODEX_MODEL` | `gpt-6-sol` | Validated against the live catalog |
-| `CODEX_PREFER_DAYBREAK` | `true` | A live-listed Daybreak model outranks `CODEX_MODEL` when no model is named |
+| `CODEX_PREFER_DAYBREAK` | `true` | Swap a model for its Daybreak build (`DAYBREAK_VARIANTS`) when the live catalog lists it |
 | `CODEX_EFFORT` | `high` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
 | `CODEX_TIMEOUT` | `4500` | Seconds; repo-aware work takes 10-20 min, `ultra` longer |
 | `CODEX_FOCUS` | `all` | `bugs`/`security`/`performance`/`all` |

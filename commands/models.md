@@ -27,6 +27,7 @@ Worth calling out to the user when relevant:
 - **The catalog is per-account.** Access-gated models such as
   `gpt-daybreak-blue-latest`, the defensive-security model, appear only where
   they have been approved. A model missing from the list is not a bug. When
-  one is listed, it is also the default for any request that names no model.
+  Daybreak Blue is listed, `gpt-5.6-sol` jobs run on it, since it is the same
+  snapshot under the Daybreak program.
 - **Use the full slug.** The bare `gpt-5.6` alias does not resolve under
   ChatGPT-account auth.

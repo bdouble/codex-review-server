@@ -16,18 +16,21 @@ Support for **GPT-6 Sol** and **GPT-6 Luna**, verified against **codex-cli
   every effort up to `ultra`. **GPT-6 Luna (`gpt-6-luna`)** — fast and
   affordable, up to `max` (no `ultra`). Both need codex-cli 0.156 or newer;
   0.154.0 does not list them, so run `codex update`.
-- **Daybreak is preferred when the account has it.** A request that names no
-  model runs on the Daybreak model in the account's *live* catalog, ahead of
-  `CODEX_MODEL`. The static fallback never triggers it, because it lists
-  Daybreak for every account. `CODEX_PREFER_DAYBREAK=false` turns it off, and
-  an explicit `model` always wins. `codex_models` reports the effective default.
+- **Daybreak builds are preferred when the account has them.** A job on a model
+  with a Daybreak build runs as that build if the account's *live* catalog
+  lists it. Today that means `gpt-5.6-sol` becomes `gpt-daybreak-blue-latest`,
+  which OpenAI documents as that same snapshot under the Daybreak Blue cyber
+  program. `gpt-6-sol` is unaffected: Daybreak is an access program the desktop
+  app applies per turn over app-server, and `codex exec` cannot reach it for
+  any other model. The static fallback never triggers the swap, because it
+  lists Daybreak for every account. `CODEX_PREFER_DAYBREAK=false` turns it off.
 
 ### Changed
 
 - **Default is now `gpt-6-sol` at `high`** (was `gpt-5.6-terra` at `xhigh`).
 - `/codex:delegate` aliases `sol` and `luna` now mean the GPT-6 models;
   the 5.6 ones remain reachable by full slug. The delegation skill routes to
-  GPT-6 and leaves `model` unset when Daybreak is the default.
+  GPT-6.
 - Quota-exhaustion advice points at `gpt-6-luna`.
 
 ### Removed
