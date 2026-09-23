@@ -93,7 +93,7 @@ class TestBuildCommand:
 
     def test_missing_binary_raises(self, monkeypatch):
         monkeypatch.setattr(codex_runner.shutil, "which", lambda _: None)
-        with pytest.raises(CodexNotFoundError, match="npm i -g @openai/codex"):
+        with pytest.raises(CodexNotFoundError, match="chatgpt.com/codex/install.sh"):
             build_command("gpt-5.6-terra", "xhigh", "read-only", "/tmp/o.txt")
 
 
@@ -113,7 +113,7 @@ class TestClassifyFailure:
         assert not isinstance(excinfo.value, CodexRateLimitError)
 
     def test_quota_exhaustion_suggests_cheaper_model(self):
-        with pytest.raises(CodexRateLimitError, match="gpt-5.6-luna"):
+        with pytest.raises(CodexRateLimitError, match="gpt-6-luna"):
             _classify_failure('{"error":"usage_limit_reached"}', "", 1)
 
     def test_quota_reset_time_is_surfaced(self):
@@ -381,7 +381,7 @@ class TestUsageLimitWordingFromCodex0154:
             _classify_failure("", self.LIVE_MESSAGE, 1)
 
     def test_live_wording_suggests_a_cheaper_model(self):
-        with pytest.raises(CodexRateLimitError, match="gpt-5.6-luna"):
+        with pytest.raises(CodexRateLimitError, match="gpt-6-luna"):
             _classify_failure("", self.LIVE_MESSAGE, 1)
 
     def test_prose_reset_time_is_surfaced(self):

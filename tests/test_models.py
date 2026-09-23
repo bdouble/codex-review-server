@@ -315,13 +315,15 @@ class TestLiveCatalogOutranksStaticTables:
         error = models.validate("gpt-5.3-codex", "xhigh")
         assert "deprecated" in error
 
-    def test_spark_is_no_longer_deny_listed(self):
-        assert "gpt-5.3-codex-spark" not in models.DEPRECATED_MODELS
+    def test_spark_is_deny_listed_now_that_it_is_retired(self):
+        # Dropped from the catalog in codex-cli 0.156.1; a live run on
+        # 2026-09-23 returned HTTP 400. A live listing would still outrank this.
+        assert "gpt-6-luna" in models.DEPRECATED_MODELS["gpt-5.3-codex-spark"]
 
     def test_retired_54_family_is_deny_listed_with_a_replacement(self):
         # Dropped from the live catalog in the 0.154.0 era. Naming a successor
         # beats letting codex answer with a bare 400 twenty minutes in.
-        assert "gpt-5.6-luna" in models.DEPRECATED_MODELS["gpt-5.4-mini"]
+        assert "gpt-6-luna" in models.DEPRECATED_MODELS["gpt-5.4-mini"]
         assert "gpt-5.5" in models.DEPRECATED_MODELS["gpt-5.4"]
 
 
@@ -385,3 +387,68 @@ class TestModelDescriptions:
             if not entry.get("description")
         ]
         assert missing == [], f"no description for: {missing}"
+
+
+def _entry(slug, efforts, visibility="list"):
+    return {
+        "slug": slug,
+        "display_name": slug,
+        "default_reasoning_level": "medium",
+        "supported_reasoning_levels": [{"effort": e} for e in efforts],
+        "visibility": visibility,
+    }
+
+
+_ALL = ["low", "medium", "high", "xhigh", "max", "ultra"]
+
+# codex-cli 0.156.1, verified live on 2026-09-23. 0.154.0 does not list the
+# GPT-6 Sol and Luna models at all, so an older CLI cannot run them.
+SAMPLE_0156 = {"models": [
+    _entry("gpt-6-astra", _ALL),
+    _entry("gpt-6-sol", _ALL),
+    _entry("gpt-6-luna", _ALL[:-1]),
+    _entry("gpt-reserve", _ALL[:-1], visibility="hide"),
+    _entry("gpt-5.6-sol", _ALL),
+    _entry("gpt-daybreak-blue-latest", _ALL),
+]}
+
+
+class TestCodex0156Catalog:
+    def test_gpt6_sol_and_luna_are_listed(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
+        catalog = models.get_catalog()
+        assert "gpt-6-sol" in catalog and "gpt-6-luna" in catalog
+
+    def test_gpt6_luna_has_no_ultra(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
+        assert models.validate("gpt-6-luna", "max") is None
+        assert "not supported" in models.validate("gpt-6-luna", "ultra")
+
+    def test_fallback_carries_gpt6_sol_and_luna(self):
+        assert "ultra" in models.FALLBACK_CATALOG["gpt-6-sol"]["efforts"]
+        assert "ultra" not in models.FALLBACK_CATALOG["gpt-6-luna"]["efforts"]
+
+
+class TestDaybreakVariant:
+    def test_found_in_a_live_catalog(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
+        assert models.daybreak_variant("gpt-5.6-sol") == "gpt-daybreak-blue-latest"
+
+    def test_gpt6_sol_has_none_reachable_through_exec(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
+        assert models.daybreak_variant("gpt-6-sol") is None
+
+    def test_none_when_the_account_lacks_it(self, monkeypatch):
+        payload = {"models": [_entry("gpt-5.6-sol", _ALL)]}
+        _stub_codex(monkeypatch, json.dumps(payload))
+        assert models.daybreak_variant("gpt-5.6-sol") is None
+
+    def test_never_taken_from_the_fallback(self, monkeypatch):
+        # The fallback lists Daybreak for every account, approved or not.
+        monkeypatch.setattr(models.shutil, "which", lambda _: None)
+        assert models.daybreak_variant("gpt-5.6-sol") is None
+
+    def test_every_variant_is_in_the_fallback_catalog(self):
+        for base, variant in models.DAYBREAK_VARIANTS.items():
+            assert base in models.FALLBACK_CATALOG
+            assert variant in models.FALLBACK_CATALOG

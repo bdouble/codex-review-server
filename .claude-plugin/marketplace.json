@@ -11,8 +11,8 @@
     {
       "name": "codex-delegate",
       "source": "./",
-      "description": "Use Claude Code as a multi-agent orchestrator with Codex as a delegate. Any task \u2014 engineering, research, writing \u2014 runs as a background job you can monitor, resume, and verify. Supports GPT-5.6 Sol/Terra/Luna at any effort up to ultra.",
-      "version": "2.2.0",
+      "description": "Use Claude Code as a multi-agent orchestrator with Codex as a delegate. Any task \u2014 engineering, research, writing \u2014 runs as a background job you can monitor, resume, and verify. Supports GPT-6 Astra/Sol/Luna, Daybreak Blue, and GPT-5.6 at any effort up to ultra.",
+      "version": "2.3.0",
       "author": {
         "name": "Brian Benitez",
         "email": "brian.f.benitez@gmail.com"

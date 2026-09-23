@@ -137,16 +137,38 @@ def _conflict_message(conflict: dict, project_dir: str, write: bool) -> str:
     )
 
 
-def _resolve_settings(model: str, effort: str) -> tuple[str, str, str | None]:
-    """Resolve model/effort against config and the live catalog."""
+def _prefer_daybreak(model: str) -> str:
+    """Swap in the model's Daybreak build when the account has one.
+
+    Same base model, run under the security-aware Daybreak program, so this is
+    a substitution rather than a routing decision: gpt-6-sol has no Daybreak
+    build reachable through `codex exec` and stays as it is.
+    CODEX_PREFER_DAYBREAK=false turns it off.
+    """
+    if Config.PREFER_DAYBREAK:
+        return models.daybreak_variant(model, Config.CODEX_HOME) or model
+    return model
+
+
+def _resolve_settings(
+    model: str, effort: str, keep_model: bool = False
+) -> tuple[str, str, str | None]:
+    """Resolve model/effort against config and the live catalog.
+
+    keep_model skips the Daybreak swap, for a follow-up inheriting the model
+    its thread already ran on.
+    """
     chosen_model = model or Config.MODEL
+    if not keep_model:
+        chosen_model = _prefer_daybreak(chosen_model)
     chosen_effort = effort or Config.EFFORT
     error = models.validate(chosen_model, chosen_effort, Config.CODEX_HOME)
     return chosen_model, chosen_effort, error
 
 
 def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
-            timeout: int, verify_timeout: int = 0, **request_fields) -> str:
+            timeout: int, verify_timeout: int = 0, keep_model: bool = False,
+            **request_fields) -> str:
     """Validate, create a job, and spawn its worker."""
     try:
         find_codex_binary()
@@ -180,7 +202,7 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             f"for work in an ordinary directory.",
         )
 
-    chosen_model, chosen_effort, error = _resolve_settings(model, effort)
+    chosen_model, chosen_effort, error = _resolve_settings(model, effort, keep_model)
     if error:
         return _error("invalid_model", error)
 
@@ -298,10 +320,11 @@ def codex_delegate(
         task: The complete task. Be specific about what "done" means — Codex
             cannot ask clarifying questions mid-run.
         project_dir: Absolute path to the working directory.
-        model: Model slug (e.g. "gpt-5.6-sol"). Defaults to CODEX_MODEL.
-            Call codex_models for the live catalog.
+        model: Model slug (e.g. "gpt-6-sol"). Defaults to CODEX_MODEL. A model
+            with a Daybreak build the account can use (gpt-5.6-sol) runs as
+            that build. Call codex_models for the live catalog.
         effort: low|medium|high|xhigh|max|ultra. Defaults to CODEX_EFFORT.
-            "ultra" (Sol/Terra only) runs four agents in parallel — slow, for
+            "ultra" (not on Luna or 5.5) runs several agents in parallel — slow, for
             genuinely hard problems.
         write: True to allow file edits (workspace-write). Default read-only.
         context: Background Codex should have — constraints, prior findings,
@@ -398,6 +421,7 @@ def codex_follow_up(
         project_dir=record["project_dir"],
         model=model or record.get("model", ""),
         effort=effort or record.get("effort", ""),
+        keep_model=not model,
         write=write,
         timeout=timeout,
         task=task,
@@ -561,8 +585,8 @@ def codex_models() -> str:
     Read live from the Codex CLI, so it reflects reality rather than this
     server's assumptions — including models released after this server was
     written, and access-gated ones such as gpt-daybreak-blue-latest that exist
-    only on approved accounts. Effort support is per-model: gpt-5.6-luna has no
-    "ultra", and gpt-5.5 / gpt-5.3-codex-spark top out at "xhigh".
+    only on approved accounts. Effort support is per-model: the Luna models have no
+    "ultra", and gpt-5.5 tops out at "xhigh".
 
     Returns:
         JSON catalog with each model's description, efforts and default
@@ -570,7 +594,7 @@ def codex_models() -> str:
     """
     catalog = models.describe(Config.CODEX_HOME)
     catalog["configured_default"] = {
-        "model": Config.MODEL,
+        "model": _prefer_daybreak(Config.MODEL),
         "effort": Config.EFFORT,
     }
     return json.dumps(catalog, indent=2)
@@ -601,7 +625,8 @@ def codex_review(
         base_branch: Branch or commit to compare against (default: "main").
         focus: "bugs", "security", "performance", or "all".
         context: Additional context (ticket description, acceptance criteria).
-        model: Model slug. Defaults to CODEX_MODEL.
+        model: Model slug. Defaults to CODEX_MODEL; swapped for its Daybreak
+            build when the account has one.
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
 
@@ -644,7 +669,8 @@ def codex_review_and_fix(
         base_branch: Branch or commit to compare against (default: "main").
         focus: "bugs", "security", "performance", or "all".
         context: Additional context (ticket description, acceptance criteria).
-        model: Model slug. Defaults to CODEX_MODEL.
+        model: Model slug. Defaults to CODEX_MODEL; swapped for its Daybreak
+            build when the account has one.
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         verify_command: Shell command to run afterwards (e.g. "pytest -q").
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
@@ -684,7 +710,8 @@ def codex_fix(
         project_dir: Absolute path to the project repository.
         findings: The findings to fix (from codex_review, filtered by the user).
         context: Guidance on approach, constraints, or preferences.
-        model: Model slug. Defaults to CODEX_MODEL.
+        model: Model slug. Defaults to CODEX_MODEL; swapped for its Daybreak
+            build when the account has one.
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         verify_command: Shell command to run afterwards (e.g. "pytest -q").
         timeout: Seconds. Defaults to CODEX_TIMEOUT.

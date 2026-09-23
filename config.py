@@ -18,8 +18,8 @@ import models
 
 _ENV_FILE = Path(__file__).parent / ".env"
 
-DEFAULT_MODEL = "gpt-5.6-terra"
-DEFAULT_EFFORT = "xhigh"
+DEFAULT_MODEL = "gpt-6-sol"
+DEFAULT_EFFORT = "high"
 DEFAULT_TIMEOUT = "4500"
 
 # "none" was a valid reasoning level under the 5.3-era catalog and is listed as
@@ -119,6 +119,12 @@ class Config:
     @classproperty
     def MODEL(cls) -> str:
         return cls._get("CODEX_MODEL", DEFAULT_MODEL, legacy_key="CODEX_REVIEW_MODEL")
+
+    @classproperty
+    def PREFER_DAYBREAK(cls) -> bool:
+        return cls._get("CODEX_PREFER_DAYBREAK", "true").strip().lower() not in (
+            "0", "false", "no", "off",
+        )
 
     @classproperty
     def EFFORT(cls) -> str:

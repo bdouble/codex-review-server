@@ -35,7 +35,7 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
   server is declared inline in `plugin.json`; a root `.mcp.json` would be
   loaded as *project* config, where `${CLAUDE_PLUGIN_ROOT}` does not expand.
-- **`tests/`** — 323 pytest tests. No Codex calls; the CLI is stubbed.
+- **`tests/`** — pytest suite. No Codex calls; the CLI is stubbed.
 
 ## Development Commands
 
@@ -95,7 +95,7 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
 
 ## Codex CLI Gotchas
 
-Re-verified against codex-cli 0.154.0 on 2026-09-10. These contradict parts of
+Re-verified against codex-cli 0.156.1 on 2026-09-23. These contradict parts of
 the published docs — trust the CLI, and re-verify with `codex exec --help`
 before assuming.
 
@@ -104,15 +104,29 @@ before assuming.
   `-c sandbox_mode="..."`.
 - **`-c` values are parsed as TOML**, so strings need quotes:
   `-c model_reasoning_effort='"xhigh"'`.
-- **Effort support is per-model.** Luna has no `ultra`; 5.5 and
-  `gpt-5.3-codex-spark` have neither `max` nor `ultra`. `codex debug models` is
+- **GPT-6 Sol and Luna need codex-cli ≥ 0.156.** Older CLIs don't list them,
+  so validation against their catalog can't see them.
+- **Effort support is per-model.** Luna (5.6 and 6) has no `ultra`; 5.5 has
+  neither `max` nor `ultra`. Codex does not enforce this itself (6 Luna at
+  `ultra` exits 0), so our up-front check is the only guard. `codex debug models` is
   the authority, and it is per-account: the access-gated
   `gpt-daybreak-blue-latest` appears only where it has been approved.
+- **Daybreak is an access program, not just a slug.** The catalog's
+  `available_access_programs.cyber` lists `daybreak_blue` on nearly every model.
+  The desktop app applies it per turn via app-server
+  `turn/start.cyberAccessProgram` (its `[desktop.daybreak-enabled]` toggle).
+  `exec` has no flag or config key for it, and `-c cyber_access_program=...` is
+  silently ignored. Under `exec`, only the `gpt-daybreak-blue-latest` slug gets
+  Daybreak, and it is `gpt-5.6-sol` (developers.openai.com model page). The
+  catalog does not say which base it uses and `-latest` moves, so re-check
+  `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red automatically: it is a
+  separate, offensive-security approval.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.
 - **Bare `gpt-5.6` fails under ChatGPT auth** — full slugs only.
-- **`gpt-5.3-codex` / `gpt-5.2` / `gpt-5.4*` are gone** and return HTTP 400.
+- **`gpt-5.3-codex` / `gpt-5.2` / `gpt-5.4*` / `gpt-5.3-codex-spark` are
+  gone** and return HTTP 400.
 - **stderr carries noise on successful runs** (other MCP servers in the user's
   codex config log auth errors there). Only classify errors when the exit code
   is non-zero.
@@ -130,8 +144,9 @@ All optional; configured in `.env` (see `.env.example`). The older
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `CODEX_MODEL` | `gpt-5.6-terra` | Validated against the live catalog |
-| `CODEX_EFFORT` | `xhigh` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
+| `CODEX_MODEL` | `gpt-6-sol` | Validated against the live catalog |
+| `CODEX_PREFER_DAYBREAK` | `true` | Swap a model for its Daybreak build (`DAYBREAK_VARIANTS`) when the live catalog lists it |
+| `CODEX_EFFORT` | `high` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
 | `CODEX_TIMEOUT` | `4500` | Seconds; repo-aware work takes 10-20 min, `ultra` longer |
 | `CODEX_FOCUS` | `all` | `bugs`/`security`/`performance`/`all` |
 | `CODEX_HOME_DIR` | `~/.codex` | Codex CLI credentials directory |

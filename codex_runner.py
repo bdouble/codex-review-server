@@ -49,7 +49,8 @@ def find_codex_binary() -> str:
     path = shutil.which("codex")
     if path is None:
         raise CodexNotFoundError(
-            "Codex CLI not found. Install with: npm i -g @openai/codex\n"
+            "Codex CLI not found. Install the standalone CLI with: "
+            "curl -fsSL https://chatgpt.com/codex/install.sh | sh\n"
             "Then authenticate with: codex login"
         )
     return path
@@ -132,7 +133,7 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
             ("Codex quota exhausted." if exhausted else "Codex rate limited.")
             + reset_hint
             + " Wait and retry, or delegate to a cheaper model "
-              "(e.g. gpt-5.6-luna) or a lower effort."
+              "(e.g. gpt-6-luna) or a lower effort."
         )
 
     # Anchored to an HTTP status or to codex's own remediation hint, rather

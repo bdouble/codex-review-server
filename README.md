@@ -56,29 +56,40 @@ Durable capability tiers rather than a version list:
 
 | Model | Best for | Efforts |
 |-------|----------|---------|
-| `gpt-6-astra` | GPT-6. The most capable model, for complex, demanding work. | low → xhigh, `max`, `ultra` |
-| `gpt-5.6-sol` | Frontier. Ambiguous, difficult, high-value work. | low → xhigh, `max`, `ultra` |
-| `gpt-5.6-terra` | The pragmatic all-rounder. **Default.** | low → xhigh, `max`, `ultra` |
-| `gpt-5.6-luna` | Fast. Extraction, classification, structured summaries. | low → xhigh, `max` |
-| `gpt-daybreak-blue-latest` | Defensive cybersecurity work. Access-gated. | low → xhigh, `max`, `ultra` |
-| `gpt-5.3-codex-spark` | Ultra-fast. Small, mechanical, well-specified edits. | low → xhigh |
-| `gpt-5.5` | Previous generation. | low → xhigh |
+| `gpt-6-astra` | Frontier intelligence for the most demanding work. | low → xhigh, `max`, `ultra` |
+| `gpt-6-sol` | The workhorse for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
+| `gpt-6-luna` | Fast and affordable, for easier tasks. | low → xhigh, `max` |
+| `gpt-daybreak-blue-latest` | `gpt-5.6-sol` under the Daybreak Blue cyber program; defensive security work. Access-gated. | low → xhigh, `max`, `ultra` |
+| `gpt-5.6-sol` / `gpt-5.6-terra` | Previous generation. | low → xhigh, `max`, `ultra` |
+| `gpt-5.6-luna` | Previous generation, fast. | low → xhigh, `max` |
+| `gpt-5.5` | Older generation. | low → xhigh |
 
-Default: **`gpt-5.6-terra` at `xhigh`**.
+Default: **`gpt-6-sol` at `high`**.
+
+**Daybreak builds are preferred.** On an account approved for Daybreak Blue,
+a job on a model that has a Daybreak build runs as that build. Today that means
+`gpt-5.6-sol` runs as `gpt-daybreak-blue-latest`, which OpenAI documents as the
+same snapshot under the Daybreak program. `gpt-6-sol` is left alone, because
+`codex exec` cannot reach a Daybreak build of it: the Codex desktop app applies
+Daybreak to most models per turn, but only over the app-server protocol, and
+`exec` has no equivalent. `CODEX_PREFER_DAYBREAK=false` turns the swap off.
+
+GPT-6 Sol and Luna need **codex-cli 0.156 or newer**; older CLIs don't list
+them. Run `codex update`.
 
 Things that will bite you if you don't know them — all enforced by the server:
 
-- **Effort validity is per-model.** Luna has no `ultra`. 5.5 and Spark have
+- **Effort validity is per-model.** Luna (5.6 and 6) has no `ultra`. 5.5 has
   neither `max` nor `ultra`. An invalid pair is rejected up front rather than
   failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **Sol and Daybreak default to `low`** and are strong there. Start lower than
+- **5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
   you'd think.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.
 - **Use the full slug.** Bare `gpt-5.6` does not resolve under ChatGPT auth.
-- **`gpt-5.3-codex`, `gpt-5.2`, and the `gpt-5.4` family are gone** for ChatGPT
-  accounts. Rejected with a pointer to a live model.
+- **`gpt-5.3-codex`, `gpt-5.2`, the `gpt-5.4` family, and `gpt-5.3-codex-spark`
+  are gone** for ChatGPT accounts. Rejected with a pointer to a live model.
 
 The catalog is read live from the Codex CLI (`codex_models`), so a model
 released after this server was written works without a code change. That isn't
@@ -151,9 +162,17 @@ Two limits worth knowing:
 
 ```bash
 python3 --version        # 3.10+
-npm i -g @openai/codex   # see github.com/openai/codex for other platforms
+curl -fsSL https://chatgpt.com/codex/install.sh | sh   # standalone CLI → ~/.local/bin/codex
 codex login              # opens browser; credentials land in ~/.codex
+codex update             # later, to upgrade in place
 ```
+
+Use the standalone installer rather than `npm i -g @openai/codex`. The npm
+package is installed per Node version, so under nvm it silently changes with the
+project's `.nvmrc`. The launcher puts `~/.local/bin` first on `PATH`, so if you
+have both installs, the standalone one wins and a newer npm copy goes unused.
+That is how a stale CLI hides new models. Keep one install: `which -a codex`
+should print a single path.
 
 ### As a Claude Code plugin (recommended)
 
@@ -267,8 +286,9 @@ a restart.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | `gpt-5.6-terra` | Default model slug |
-| `CODEX_EFFORT` | `xhigh` | Default reasoning effort |
+| `CODEX_MODEL` | `gpt-6-sol` | Default model slug |
+| `CODEX_PREFER_DAYBREAK` | `true` | Run a model as its Daybreak build when the account's live catalog has one |
+| `CODEX_EFFORT` | `high` | Default reasoning effort |
 | `CODEX_TIMEOUT` | `4500` | Per-job timeout, seconds |
 | `CODEX_FOCUS` | `all` | Review focus: `bugs`, `security`, `performance`, `all` |
 | `CODEX_HOME_DIR` | `~/.codex` | Codex CLI home (config.toml + credentials) |
@@ -378,7 +398,7 @@ server.py ──► jobs/<id>.json          (job record; atomic writes)
     │
     ├─► worker.py (detached, reparented to init)
     │       │
-    │       ├─► codex exec --model gpt-5.6-terra -c model_reasoning_effort="xhigh"
+    │       ├─► codex exec --model gpt-6-sol -c model_reasoning_effort="high"
     │       │     --sandbox read-only --json -o <out>    (runs IN your repo)
     │       │        │ streams JSONL events → phase, thread_id, token usage
     │       │        ▼
@@ -408,7 +428,7 @@ Notes on the implementation, since they're the non-obvious parts:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python3 -m pytest tests/ -q      # 233 tests, no Codex calls needed
+.venv/bin/python3 -m pytest tests/ -q      # no Codex calls needed
 ```
 
 The suite stubs the CLI, so it's fast and offline. It covers command
@@ -418,12 +438,17 @@ plugin manifests, and every tool's validation path.
 
 ## Troubleshooting
 
-**"Codex CLI not found"** — `npm i -g @openai/codex`, then `which codex`.
+**"Codex CLI not found"** — install the standalone CLI (see Prerequisites),
+then `which codex`.
+
+**A new model is missing or rejected** — the CLI is probably too old; its
+catalog is what the server validates against. Run `codex update`, then check
+`which -a codex` for a second, stale install that is shadowing the new one.
 
 **Authentication failed** — `codex login`. The server can't do this for you.
 
 **Rate limit** — Plus allows 30-150 messages/5hr, Pro 300-1500. The error
-distinguishes quota exhaustion (switch to `gpt-5.6-luna`, lower the effort, or
+distinguishes quota exhaustion (switch to `gpt-6-luna`, lower the effort, or
 wait for the reset it reports) from transient throttling (just retry).
 
 **`invalid_model`** — a deprecated slug or an effort that model doesn't support.
@@ -431,7 +456,7 @@ Run `codex_models` for what's actually available.
 
 **Job times out** — `status: timeout` still returns whatever partial work was
 salvaged; treat it as incomplete. Narrow the task, lower the effort, or raise
-`CODEX_TIMEOUT`. `ultra` runs four agents and needs real headroom.
+`CODEX_TIMEOUT`. `ultra` runs several agents and needs real headroom.
 
 **Job stuck `running`** — check `phase` via `codex_status`. `max`/`ultra` runs
 are genuinely long. `codex_cancel` if wedged.
