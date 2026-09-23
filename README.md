@@ -428,7 +428,7 @@ Notes on the implementation, since they're the non-obvious parts:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python3 -m pytest tests/ -q      # 233 tests, no Codex calls needed
+.venv/bin/python3 -m pytest tests/ -q      # no Codex calls needed
 ```
 
 The suite stubs the CLI, so it's fast and offline. It covers command

@@ -49,7 +49,8 @@ def find_codex_binary() -> str:
     path = shutil.which("codex")
     if path is None:
         raise CodexNotFoundError(
-            "Codex CLI not found. Install with: npm i -g @openai/codex\n"
+            "Codex CLI not found. Install the standalone CLI with: "
+            "curl -fsSL https://chatgpt.com/codex/install.sh | sh\n"
             "Then authenticate with: codex login"
         )
     return path

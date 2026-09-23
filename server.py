@@ -150,16 +150,25 @@ def _prefer_daybreak(model: str) -> str:
     return model
 
 
-def _resolve_settings(model: str, effort: str) -> tuple[str, str, str | None]:
-    """Resolve model/effort against config and the live catalog."""
-    chosen_model = _prefer_daybreak(model or Config.MODEL)
+def _resolve_settings(
+    model: str, effort: str, keep_model: bool = False
+) -> tuple[str, str, str | None]:
+    """Resolve model/effort against config and the live catalog.
+
+    keep_model skips the Daybreak swap, for a follow-up inheriting the model
+    its thread already ran on.
+    """
+    chosen_model = model or Config.MODEL
+    if not keep_model:
+        chosen_model = _prefer_daybreak(chosen_model)
     chosen_effort = effort or Config.EFFORT
     error = models.validate(chosen_model, chosen_effort, Config.CODEX_HOME)
     return chosen_model, chosen_effort, error
 
 
 def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
-            timeout: int, verify_timeout: int = 0, **request_fields) -> str:
+            timeout: int, verify_timeout: int = 0, keep_model: bool = False,
+            **request_fields) -> str:
     """Validate, create a job, and spawn its worker."""
     try:
         find_codex_binary()
@@ -193,7 +202,7 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             f"for work in an ordinary directory.",
         )
 
-    chosen_model, chosen_effort, error = _resolve_settings(model, effort)
+    chosen_model, chosen_effort, error = _resolve_settings(model, effort, keep_model)
     if error:
         return _error("invalid_model", error)
 
@@ -412,6 +421,7 @@ def codex_follow_up(
         project_dir=record["project_dir"],
         model=model or record.get("model", ""),
         effort=effort or record.get("effort", ""),
+        keep_model=not model,
         write=write,
         timeout=timeout,
         task=task,

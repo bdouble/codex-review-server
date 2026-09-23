@@ -500,6 +500,31 @@ class TestDaybreakVariants:
         )
         assert result["model"] == "gpt-5.6-sol"
 
+    def _finished_job(self, project, model):
+        started = _call(codex_delegate, task="do x", project_dir=project, model=model)
+        jobs.update_job(
+            started["job_id"], status="completed", thread_id="t-1", worker_pid=None,
+        )
+        return started["job_id"]
+
+    def test_follow_up_keeps_the_original_jobs_model(
+        self, project, daybreak_account, monkeypatch
+    ):
+        # A thread started on the base model (swap off, or before this account
+        # was approved) must not silently change model when it is resumed.
+        monkeypatch.setenv("CODEX_PREFER_DAYBREAK", "false")
+        job_id = self._finished_job(project, "gpt-5.6-sol")
+        monkeypatch.delenv("CODEX_PREFER_DAYBREAK")
+        result = _call(codex_follow_up, job_id=job_id, task="more")
+        assert result["model"] == "gpt-5.6-sol"
+
+    def test_follow_up_swaps_an_explicit_model(self, project, daybreak_account):
+        job_id = self._finished_job(project, "gpt-6-sol")
+        result = _call(
+            codex_follow_up, job_id=job_id, task="more", model="gpt-5.6-sol"
+        )
+        assert result["model"] == "gpt-daybreak-blue-latest"
+
 
 class TestErrorClassification:
     def test_error_type_reaches_the_caller(self, project):

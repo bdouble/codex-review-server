@@ -23,7 +23,8 @@ Support for **GPT-6 Sol** and **GPT-6 Luna**, verified against **codex-cli
   program. `gpt-6-sol` is unaffected: Daybreak is an access program the desktop
   app applies per turn over app-server, and `codex exec` cannot reach it for
   any other model. The static fallback never triggers the swap, because it
-  lists Daybreak for every account. `CODEX_PREFER_DAYBREAK=false` turns it off.
+  lists Daybreak for every account. A follow-up keeps the model its thread ran
+  on unless it names one. `CODEX_PREFER_DAYBREAK=false` turns it off.
 
 ### Changed
 

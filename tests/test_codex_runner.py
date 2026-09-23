@@ -93,7 +93,7 @@ class TestBuildCommand:
 
     def test_missing_binary_raises(self, monkeypatch):
         monkeypatch.setattr(codex_runner.shutil, "which", lambda _: None)
-        with pytest.raises(CodexNotFoundError, match="npm i -g @openai/codex"):
+        with pytest.raises(CodexNotFoundError, match="chatgpt.com/codex/install.sh"):
             build_command("gpt-5.6-terra", "xhigh", "read-only", "/tmp/o.txt")
 
 

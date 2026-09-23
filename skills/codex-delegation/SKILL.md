@@ -172,7 +172,7 @@ that field, not on the prose, which is written for the user and will change.
 | `rate_limit`, message says *quota exhausted* | Out of quota | Drop to `gpt-6-luna` or a lower effort, or wait for the reset in the message |
 | `rate_limit`, message says *rate limited* | Transient throttle | Retry shortly |
 | `auth_error` | Session expired | The user runs `codex login` — you cannot do it for them |
-| `codex_not_found` | CLI not installed | `npm i -g @openai/codex` |
+| `codex_not_found` | CLI not installed | The user installs the standalone CLI (`curl -fsSL https://chatgpt.com/codex/install.sh \| sh`); see the README |
 | `codex_error` | Everything else codex rejected | Read the message: it always carries codex's own words verbatim |
 | `worker_error` | The job's own worker broke, not codex | A bug here — report the message rather than retrying |
 
