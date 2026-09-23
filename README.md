@@ -456,7 +456,7 @@ Run `codex_models` for what's actually available.
 
 **Job times out** — `status: timeout` still returns whatever partial work was
 salvaged; treat it as incomplete. Narrow the task, lower the effort, or raise
-`CODEX_TIMEOUT`. `ultra` runs four agents and needs real headroom.
+`CODEX_TIMEOUT`. `ultra` runs several agents and needs real headroom.
 
 **Job stuck `running`** — check `phase` via `codex_status`. `max`/`ultra` runs
 are genuinely long. `codex_cancel` if wedged.

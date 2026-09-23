@@ -324,7 +324,7 @@ def codex_delegate(
             with a Daybreak build the account can use (gpt-5.6-sol) runs as
             that build. Call codex_models for the live catalog.
         effort: low|medium|high|xhigh|max|ultra. Defaults to CODEX_EFFORT.
-            "ultra" (not on Luna or 5.5) runs four agents in parallel — slow, for
+            "ultra" (not on Luna or 5.5) runs several agents in parallel — slow, for
             genuinely hard problems.
         write: True to allow file edits (workspace-write). Default read-only.
         context: Background Codex should have — constraints, prior findings,

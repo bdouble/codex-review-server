@@ -1,6 +1,6 @@
 ---
 description: Cross-model code review of the current branch by Codex (optionally auto-fixing clear findings)
-argument-hint: "[base-branch] [--fix] [--focus bugs|security|performance|all] [--model sol|terra|luna|daybreak] [--effort xhigh|max|ultra]"
+argument-hint: "[base-branch] [--fix] [--focus bugs|security|performance|all] [--model sol|terra|luna|daybreak] [--effort high|xhigh|max|ultra]"
 allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_review, mcp__plugin_codex-delegate_codex-delegate__codex_review_and_fix, mcp__plugin_codex-delegate_codex-delegate__codex_status, mcp__plugin_codex-delegate_codex-delegate__codex_result, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git branch:*)
 ---
 
@@ -31,8 +31,9 @@ diff is empty, say so and stop rather than launching a run that finds nothing.
 `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`, `daybreak` →
 `gpt-daybreak-blue-latest`. A full slug also works.
 
-Reviews are worth real reasoning budget. Default to `xhigh`; use `max` on a
-large or high-stakes diff. Pass `verify_command` on `--fix` runs when the repo
+Reviews are worth real reasoning budget. Use `high` for a routine diff and
+`xhigh` for a substantial one; save `max` for a large or high-stakes diff.
+This matches the `codex-delegation` skill's routing table. Pass `verify_command` on `--fix` runs when the repo
 has tests.
 
 **3. Report the job id, then poll** with `codex_status(job_id, wait=True)`.
