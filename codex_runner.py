@@ -153,7 +153,8 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
     if "not supported when using codex with a chatgpt account" in lowered:
         return CodexError, (
             "Codex rejected the model. This usually means the slug is "
-            "deprecated or unavailable on your plan."
+            "deprecated or unavailable on your plan, or newer than your "
+            "codex CLI (run `codex update`)."
         )
 
     return None

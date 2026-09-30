@@ -127,7 +127,7 @@ class TestDelegateLaunch:
 
     def test_uses_configured_default_model(self, project):
         result = _call(codex_delegate, task="do x", project_dir=project)
-        assert result["model"] == "gpt-6-sol"
+        assert result["model"] == "gpt-6.1-sol"
         assert result["effort"] == "high"
 
     def test_model_override(self, project):
@@ -404,8 +404,8 @@ class TestReviewTools:
 class TestModelsTool:
     def test_lists_models_and_configured_default(self):
         result = _call(codex_models)
-        assert "gpt-6-sol" in result["models"]
-        assert result["configured_default"]["model"] == "gpt-6-sol"
+        assert "gpt-6.1-sol" in result["models"]
+        assert result["configured_default"]["model"] == "gpt-6.1-sol"
         assert "gpt-5.3-codex" in result["deprecated"]
 
     def test_configured_default_reports_the_daybreak_build(
@@ -435,7 +435,8 @@ def daybreak_account(monkeypatch):
     monkeypatch.setattr(
         models, "_query_catalog",
         lambda codex_home=None: _live_catalog(
-            "gpt-6-astra", "gpt-6-sol", "gpt-5.6-sol", "gpt-daybreak-blue-latest"
+            "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-5.6-sol",
+            "gpt-daybreak-blue-latest",
         ),
     )
 
@@ -445,7 +446,7 @@ class TestDaybreakVariants:
 
     gpt-daybreak-blue-latest is gpt-5.6-sol under the Daybreak program, not a
     tier above GPT-6. Routing everything to it would quietly downgrade the
-    gpt-6-sol default by a generation.
+    gpt-6.1-sol default.
     """
 
     def test_base_model_runs_as_its_daybreak_build(self, project, daybreak_account):
@@ -461,8 +462,14 @@ class TestDaybreakVariants:
         result = _call(codex_review, project_dir=project)
         assert result["model"] == "gpt-daybreak-blue-latest"
 
-    def test_default_gpt6_sol_is_not_downgraded(self, project, daybreak_account):
+    def test_default_gpt6_1_sol_is_not_downgraded(self, project, daybreak_account):
         result = _call(codex_delegate, task="do x", project_dir=project)
+        assert result["model"] == "gpt-6.1-sol"
+
+    def test_gpt6_sol_is_not_downgraded(self, project, daybreak_account):
+        result = _call(
+            codex_delegate, task="do x", project_dir=project, model="gpt-6-sol"
+        )
         assert result["model"] == "gpt-6-sol"
 
     def test_models_without_a_daybreak_build_are_untouched(

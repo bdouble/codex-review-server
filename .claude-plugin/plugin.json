@@ -1,7 +1,7 @@
 {
   "name": "codex-delegate",
-  "version": "2.3.0",
-  "description": "Delegate any engineering, research, or writing task to OpenAI's Codex CLI from Claude Code. Background jobs, a live per-account model catalog (GPT-6 Astra/Sol/Luna, Daybreak Blue, GPT-5.6), session resume, structured output, and git-grounded verification of what Codex actually did.",
+  "version": "2.4.0",
+  "description": "Delegate any engineering, research, or writing task to OpenAI's Codex CLI from Claude Code. Background jobs, a live per-account model catalog (GPT-6.1 Sol, GPT-6 Astra/Sol/Luna, Daybreak Blue, GPT-5.6), session resume, structured output, and git-grounded verification of what Codex actually did.",
   "author": {
     "name": "Brian Benitez",
     "email": "brian.f.benitez@gmail.com",
@@ -19,6 +19,7 @@
   "keywords": [
     "codex",
     "openai",
+    "gpt-6.1",
     "gpt-6",
     "gpt-5.6",
     "daybreak",

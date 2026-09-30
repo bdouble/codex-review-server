@@ -18,7 +18,7 @@ import models
 
 _ENV_FILE = Path(__file__).parent / ".env"
 
-DEFAULT_MODEL = "gpt-6-sol"
+DEFAULT_MODEL = "gpt-6.1-sol"
 DEFAULT_EFFORT = "high"
 DEFAULT_TIMEOUT = "4500"
 

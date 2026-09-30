@@ -141,8 +141,8 @@ def _prefer_daybreak(model: str) -> str:
     """Swap in the model's Daybreak build when the account has one.
 
     Same base model, run under the security-aware Daybreak program, so this is
-    a substitution rather than a routing decision: gpt-6-sol has no Daybreak
-    build reachable through `codex exec` and stays as it is.
+    a substitution rather than a routing decision: a model with no entry in
+    models.DAYBREAK_VARIANTS, which today is every GPT-6 model, stays as it is.
     CODEX_PREFER_DAYBREAK=false turns it off.
     """
     if Config.PREFER_DAYBREAK:
@@ -320,7 +320,7 @@ def codex_delegate(
         task: The complete task. Be specific about what "done" means — Codex
             cannot ask clarifying questions mid-run.
         project_dir: Absolute path to the working directory.
-        model: Model slug (e.g. "gpt-6-sol"). Defaults to CODEX_MODEL. A model
+        model: Model slug (e.g. "gpt-6.1-sol"). Defaults to CODEX_MODEL. A model
             with a Daybreak build the account can use (gpt-5.6-sol) runs as
             that build. Call codex_models for the live catalog.
         effort: low|medium|high|xhigh|max|ultra. Defaults to CODEX_EFFORT.

@@ -1,6 +1,6 @@
 ---
 description: Cross-model code review of the current branch by Codex (optionally auto-fixing clear findings)
-argument-hint: "[base-branch] [--fix] [--focus bugs|security|performance|all] [--model sol|terra|luna|daybreak] [--effort high|xhigh|max|ultra]"
+argument-hint: "[base-branch] [--fix] [--focus bugs|security|performance|all] [--model astra|sol|terra|luna|daybreak] [--effort high|xhigh|max|ultra]"
 allowed-tools: mcp__plugin_codex-delegate_codex-delegate__codex_review, mcp__plugin_codex-delegate_codex-delegate__codex_review_and_fix, mcp__plugin_codex-delegate_codex-delegate__codex_status, mcp__plugin_codex-delegate_codex-delegate__codex_result, Read, Grep, Glob, Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git branch:*)
 ---
 
@@ -27,9 +27,10 @@ diff is empty, say so and stop rather than launching a run that finds nothing.
 - `--fix` → `codex_review_and_fix` (auto-fixes only clear-cut P0-P2; anything
   ambiguous comes back as a question).
 
-`--model` takes the same aliases as `/codex:delegate`: `sol` → `gpt-6-sol`,
-`luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`, `daybreak` →
-`gpt-daybreak-blue-latest`. A full slug also works.
+`--model` takes the same aliases as `/codex:delegate`: `astra` → `gpt-6-astra`,
+`sol` → `gpt-6.1-sol`, `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`,
+`daybreak` → `gpt-daybreak-blue-latest`. A full slug also works (e.g.
+`gpt-6-sol`).
 
 Reviews are worth real reasoning budget. Use `high` for a routine diff and
 `xhigh` for a substantial one; save `max` for a large or high-stakes diff.
