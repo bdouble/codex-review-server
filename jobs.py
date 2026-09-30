@@ -216,18 +216,23 @@ def _is_our_worker(pid: int, job_id: str = "", token: str = "") -> bool:
     return True
 
 
-def _is_our_codex(pid: int, job_id: str) -> bool:
+def _is_our_codex(pid: int, job_id: str, token: str = "") -> bool:
     """Check a pid is the codex process this job spawned.
 
-    Codex is invoked with `-o <jobs_dir>/<job_id>.out`, so the job id appears
-    in its argv — a precise identity match that cannot hit an unrelated codex
-    the user is running themselves.
+    Either signal is a precise identity match that cannot hit an unrelated
+    codex the user is running themselves:
+      - `codex exec` is invoked with `-o <jobs_dir>/<job_id>.out`, so the job
+        id appears in its argv
+      - the process start time equals the token recorded at spawn. This is the
+        only one `codex app-server` has, since its argv names no job.
     """
     identity = _process_identity(pid)
     if identity is None:
         return False
-    _, command = identity
-    return "codex" in command and job_id in command
+    start_time, command = identity
+    if "codex" not in command:
+        return False
+    return job_id in command or bool(token and start_time == token)
 
 
 def reap_orphan_codex(record: dict) -> bool:
@@ -240,7 +245,9 @@ def reap_orphan_codex(record: dict) -> bool:
     will ever clean it up, so reconciliation does.
     """
     pid = record.get("codex_pid")
-    if not pid or not _is_our_codex(pid, record.get("id", "")):
+    if not pid or not _is_our_codex(
+        pid, record.get("id", ""), record.get("codex_token", "")
+    ):
         return False
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
@@ -599,7 +606,7 @@ def terminate_tree(record: dict) -> None:
     no longer reaches codex directly — codex leads a group of its own, so that
     its children can be reaped without taking the worker down with them — but
     two paths still cover it: the worker turns SIGTERM into SystemExit, which
-    unwinds into run_codex's cleanup, and callers pair this with
+    unwinds into codex_runner.supervise's cleanup, and callers pair this with
     reap_orphan_codex, which targets codex's group by its recorded pid.
 
     Takes the whole record, not a bare pid, so identity can be confirmed

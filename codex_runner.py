@@ -2,7 +2,8 @@
 
 Spawns `codex exec` inside the target repository so Codex has the same
 repo-aware capability as a manual run. Uses ChatGPT subscription auth
-(via `codex login`), not API keys.
+(via `codex login`), not API keys. The supervision, event handling and result
+assembly helpers here are shared with app_server.py, the Daybreak transport.
 
 Two things here are easy to get wrong and are handled explicitly:
 
@@ -23,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import threading
+from contextlib import contextmanager
 
 import models
 from config import Config, subprocess_env
@@ -56,7 +58,7 @@ def find_codex_binary() -> str:
     return path
 
 
-def _build_env() -> dict:
+def build_env() -> dict:
     env = subprocess_env()
     env["CODEX_HOME"] = Config.CODEX_HOME
     return env
@@ -148,6 +150,22 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
         return CodexAuthError, (
             "Codex CLI authentication failed. Your session may have expired.\n"
             "Fix: run `codex login` to re-authenticate with your ChatGPT account."
+        )
+
+    # The backend's two refusals of a requested cyber program (codex-cli
+    # 0.159.2): the account is not approved for it, or the model needs a
+    # higher tier (Daybreak on gpt-6.1-sol and gpt-6-astra needs Daybreak Red).
+    if (
+        "cyber access program is not authorized" in lowered
+        or re.search(r"daybreak isn.t available for this model", lowered)
+    ):
+        return CodexError, (
+            "Codex refused Daybreak for this model or account. The server "
+            "requests it only when the live catalog offers it, so the "
+            "account's access may have changed. Set CODEX_PREFER_DAYBREAK=false "
+            "to run without Daybreak, or check codex_models. A follow-up keeps "
+            "its thread's Daybreak setting whatever the preference; pass "
+            "`model` to have it re-resolved."
         )
 
     if "not supported when using codex with a chatgpt account" in lowered:
@@ -272,6 +290,145 @@ def _phase_for_item(item: dict, current: str) -> str:
     return current
 
 
+def new_run_state() -> dict:
+    """What a run learns from codex's event stream, shared by both transports."""
+    return {"thread_id": None, "usage": None, "phase": "starting", "timed_out": False,
+            "turn_error": None, "stream_error": None}
+
+
+def apply_event(event: dict, state: dict) -> None:
+    """Fold one `codex exec --json` event into the run state.
+
+    The app-server transport translates its notifications into these same
+    events, so this is the only place either transport interprets them.
+    """
+    event_type = event.get("type")
+    if event_type == "thread.started":
+        state["thread_id"] = event.get("thread_id")
+    elif event_type == "turn.completed":
+        state["usage"] = event.get("usage")
+    elif event_type == "turn.failed":
+        state["turn_error"] = json.dumps(event.get("error", {}))[:500]
+    elif event_type == "error":
+        # A standalone `error` event. Codex usually emits one alongside
+        # turn.failed, but not always — and when it is the only structured
+        # account of the failure, the alternative is classifying off stderr,
+        # which belongs to every MCP server codex loaded rather than to codex.
+        # Kept separate so a real turn.failed still outranks it.
+        state["stream_error"] = str(event.get("message", ""))[:500]
+    elif event_type == "item.completed":
+        item = event.get("item", {})
+        state["phase"] = _phase_for_item(item, state["phase"])
+
+
+def terminate_group(proc: subprocess.Popen, sig: int) -> None:
+    """Signal codex *and its descendants*.
+
+    Killing the direct child is not enough, and this is the whole bug: codex
+    spawns MCP servers and shells, they inherit the stdout pipe, and killing
+    only codex leaves them holding its write end open. The reader then never
+    sees EOF, so the watchdog fires, codex dies, and the run blocks on
+    regardless — the job pinned at `running` with its deadline long gone and
+    CODEX_TIMEOUT guaranteeing nothing. Reaping the group closes the pipe.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), sig)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+@contextmanager
+def supervise(proc: subprocess.Popen, timeout: int, state: dict):
+    """Enforce the timeout on a codex process and never leave it behind.
+
+    `proc` must lead its own process group (start_new_session=True), so it can
+    be signalled together with everything it spawns without taking this worker
+    down too — see terminate_group, which is the only reason the timeout is
+    enforceable at all.
+    """
+    def _kill():
+        # Nothing to time out if it already finished. The timer can fire in
+        # the gap between the reader draining and watchdog.cancel() landing,
+        # and setting the flag there would report a completed run — output
+        # and all — as a timeout.
+        if proc.poll() is not None:
+            return
+        state["timed_out"] = True
+        terminate_group(proc, signal.SIGKILL)
+
+    watchdog = threading.Timer(timeout, _kill)
+    watchdog.start()
+    try:
+        yield
+    finally:
+        watchdog.cancel()
+        if proc.stdout:
+            proc.stdout.close()
+        # If we leave this block by an exception — on_event raising because a
+        # job write failed, or SIGTERM becoming SystemExit in the worker —
+        # codex is still running, and would carry on editing files and burning
+        # quota with nobody reading its output. Never leave it, or its
+        # children, behind.
+        if proc.poll() is None:
+            terminate_group(proc, signal.SIGKILL)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+
+
+def finish_run(state: dict, exit_code: int, output_file: str, stderr_file: str,
+               schema_file: str | None, timeout: int) -> dict:
+    """Turn a finished run into the result dict, or raise its typed error.
+
+    A non-zero exit_code means the turn failed; its cause is classified from
+    the structured error first, then from stderr.
+    """
+    output = ""
+    if os.path.exists(output_file):
+        with open(output_file) as handle:
+            output = handle.read()
+
+    stderr = ""
+    if os.path.exists(stderr_file):
+        with open(stderr_file) as handle:
+            stderr = handle.read()
+
+    if state["timed_out"]:
+        # Always report a timeout as a timeout. Salvage partial work when there
+        # is any — a long task that produced a usable answer before the
+        # deadline is still worth reading — but an empty one is the same event
+        # and must not be reported as a generic failure just because nothing
+        # happened to be written yet.
+        return {
+            "thread_id": state["thread_id"],
+            "usage": state["usage"],
+            "output": output or (
+                f"Codex timed out after {timeout}s with no output. "
+                f"Increase CODEX_TIMEOUT, lower the effort, or narrow the task."
+            ),
+            "structured_output": _parse_structured(output, schema_file),
+            "timed_out": True,
+            "exit_code": exit_code,
+        }
+
+    if exit_code != 0:
+        codex_error = state["turn_error"] or state["stream_error"] or ""
+        _classify_failure(stderr, codex_error, exit_code)
+
+    return {
+        "thread_id": state["thread_id"],
+        "usage": state["usage"],
+        "output": output,
+        "structured_output": _parse_structured(output, schema_file),
+        "timed_out": False,
+        "exit_code": exit_code,
+    }
+
+
 def run_codex(
     project_dir: str,
     prompt: str,
@@ -307,8 +464,7 @@ def run_codex(
     with open(prompt_file, "w") as handle:
         handle.write(prompt)
 
-    state = {"thread_id": None, "usage": None, "phase": "starting", "timed_out": False,
-             "turn_error": None, "stream_error": None}
+    state = new_run_state()
 
     # stderr goes to a file rather than a second pipe: draining only stdout
     # while stderr fills its pipe buffer would deadlock on a chatty run.
@@ -316,53 +472,19 @@ def run_codex(
         proc = subprocess.Popen(
             cmd,
             cwd=project_dir,
-            env=_build_env(),
+            env=build_env(),
             stdin=stdin_handle,
             stdout=subprocess.PIPE,
             stderr=err_handle,
             text=True,
-            # Codex leads its own process group, so it can be signalled
-            # together with everything it spawns without taking this worker
-            # down too — see _terminate_group, which is the only reason the
-            # timeout is enforceable at all.
+            # Codex leads its own process group; see supervise.
             start_new_session=True,
         )
 
         if on_spawn:
             on_spawn(proc.pid)
 
-        def _terminate_group(sig):
-            """Signal codex *and its descendants*.
-
-            Killing the direct child is not enough, and this is the whole bug:
-            codex spawns MCP servers and shells, they inherit the stdout pipe,
-            and killing only codex leaves them holding its write end open. The
-            reader below then never sees EOF, so the watchdog fires, codex
-            dies, and run_codex blocks on regardless — the job pinned at
-            `running` with its deadline long gone and CODEX_TIMEOUT
-            guaranteeing nothing. Reaping the group closes the pipe.
-            """
-            try:
-                os.killpg(os.getpgid(proc.pid), sig)
-            except (ProcessLookupError, PermissionError, OSError):
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
-
-        def _kill():
-            # Nothing to time out if it already finished. The timer can fire in
-            # the gap between the reader draining and watchdog.cancel() landing,
-            # and setting the flag there would report a completed run — output
-            # and all — as a timeout.
-            if proc.poll() is not None:
-                return
-            state["timed_out"] = True
-            _terminate_group(signal.SIGKILL)
-
-        watchdog = threading.Timer(timeout, _kill)
-        watchdog.start()
-        try:
+        with supervise(proc, timeout, state):
             for line in proc.stdout:
                 line = line.strip()
                 if not line:
@@ -372,84 +494,13 @@ def run_codex(
                 except json.JSONDecodeError:
                     continue
 
-                event_type = event.get("type")
-                if event_type == "thread.started":
-                    state["thread_id"] = event.get("thread_id")
-                elif event_type == "turn.completed":
-                    state["usage"] = event.get("usage")
-                elif event_type == "turn.failed":
-                    state["turn_error"] = json.dumps(event.get("error", {}))[:500]
-                elif event_type == "error":
-                    # A standalone `error` event. Codex usually emits one
-                    # alongside turn.failed, but not always — and when it is the
-                    # only structured account of the failure, the alternative is
-                    # classifying off stderr, which belongs to every MCP server
-                    # codex loaded rather than to codex. Kept separate so a
-                    # real turn.failed still outranks it.
-                    state["stream_error"] = str(event.get("message", ""))[:500]
-                elif event_type == "item.completed":
-                    item = event.get("item", {})
-                    state["phase"] = _phase_for_item(item, state["phase"])
-
+                apply_event(event, state)
                 if on_event:
                     on_event(event, state)
             proc.wait()
-        finally:
-            watchdog.cancel()
-            if proc.stdout:
-                proc.stdout.close()
-            # If we leave this block by an exception — on_event raising because
-            # a job write failed, or SIGTERM becoming SystemExit in the worker
-            # — codex is still running, and would carry on editing files and
-            # burning quota with nobody reading its output. Never leave it, or
-            # its children, behind.
-            if proc.poll() is None:
-                _terminate_group(signal.SIGKILL)
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    pass
 
-    output = ""
-    if os.path.exists(output_file):
-        with open(output_file) as handle:
-            output = handle.read()
-
-    stderr = ""
-    if os.path.exists(stderr_file):
-        with open(stderr_file) as handle:
-            stderr = handle.read()
-
-    if state["timed_out"]:
-        # Always report a timeout as a timeout. Salvage partial work when there
-        # is any — a long task that produced a usable answer before the
-        # deadline is still worth reading — but an empty one is the same event
-        # and must not be reported as a generic failure just because nothing
-        # happened to be written yet.
-        return {
-            "thread_id": state["thread_id"],
-            "usage": state["usage"],
-            "output": output or (
-                f"Codex timed out after {timeout}s with no output. "
-                f"Increase CODEX_TIMEOUT, lower the effort, or narrow the task."
-            ),
-            "structured_output": _parse_structured(output, schema_file),
-            "timed_out": True,
-            "exit_code": proc.returncode,
-        }
-
-    if proc.returncode != 0:
-        codex_error = state["turn_error"] or state["stream_error"] or ""
-        _classify_failure(stderr, codex_error, proc.returncode)
-
-    return {
-        "thread_id": state["thread_id"],
-        "usage": state["usage"],
-        "output": output,
-        "structured_output": _parse_structured(output, schema_file),
-        "timed_out": False,
-        "exit_code": proc.returncode,
-    }
+    return finish_run(state, proc.returncode, output_file, stderr_file,
+                      schema_file, timeout)
 
 
 def _parse_structured(output: str, schema_file: str | None) -> dict | None:

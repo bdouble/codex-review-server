@@ -5,6 +5,50 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] — 2026-09-30
+
+**GPT-6 Sol under Daybreak Blue.** Security work now runs on `gpt-6-sol`
+with the Daybreak Blue cyber program applied, where it previously used
+`gpt-daybreak-blue-latest` (a `gpt-5.6-sol` snapshot). Verified against
+**codex-cli 0.159.2**.
+
+### Added
+
+- **Daybreak jobs run over `codex app-server`.** `codex exec` cannot request
+  a cyber program; app-server's `turn/start.cyberAccessProgram` can, behind the
+  `experimentalApi` capability. A new module, `app_server.py`, runs these turns
+  and translates app-server's notifications into the same events the exec path
+  produces. Every other job stays on `exec`.
+- **Eligibility comes from the live catalog.** A `gpt-6-sol` job runs under
+  Daybreak Blue only when the account's catalog offers `daybreak_blue` for that
+  model; the static fallback never enables it. `codex_models` now reports each
+  model's `cyber_access_programs`.
+- **Jobs report `cyber_access_program`** in the launch response, `codex_status`,
+  and `codex_models`' configured default. A follow-up keeps its thread's
+  program along with its model.
+- **Daybreak is verified, not assumed.** The protocol never confirms a turn's
+  program, so a Daybreak job's `verification` reads the thread's rollout and
+  fails the `cyber_access_program` check if it was not applied.
+- The backend's two Daybreak refusals (account not approved; model needs
+  Daybreak Red) are classified with advice instead of surfacing as raw 403s.
+
+### Changed
+
+- The `daybreak` alias in `/codex:delegate` and `/codex:review`, and the
+  delegation skill's security route, now mean `gpt-6-sol`.
+  `gpt-daybreak-blue-latest` is still reachable by full slug, and `gpt-5.6-sol`
+  still runs as it.
+- Supervision (timeout, process-group cleanup), event handling and result
+  assembly moved into shared helpers in `codex_runner.py`, so both transports
+  run the same code.
+
+### Fixed
+
+- `codex_cancel` and orphan reaping recognize a job's codex process by its
+  start time as well as by the job id in its argv. `codex app-server` has no
+  job id in its argv, so without this, cancelling a Daybreak job would have
+  left codex running.
+
 ## [2.4.0] — 2026-09-30
 
 Support for **GPT-6.1 Sol**, now the default, verified against **codex-cli

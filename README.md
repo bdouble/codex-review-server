@@ -58,24 +58,33 @@ Durable capability tiers rather than a version list:
 |-------|----------|---------|
 | `gpt-6.1-sol` | The latest workhorse for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
 | `gpt-6-astra` | Frontier intelligence for the most demanding work. | low → xhigh, `max`, `ultra` |
-| `gpt-6-sol` | Previous-generation workhorse. | low → xhigh, `max`, `ultra` |
+| `gpt-6-sol` | Previous-generation workhorse, and the Daybreak Blue model for defensive security work on approved accounts. | low → xhigh, `max`, `ultra` |
 | `gpt-6-luna` | Fast and affordable, for easier tasks. | low → xhigh, `max` |
-| `gpt-daybreak-blue-latest` | `gpt-5.6-sol` under the Daybreak Blue cyber program; defensive security work. Access-gated. | low → xhigh, `max`, `ultra` |
+| `gpt-daybreak-blue-latest` | `gpt-5.6-sol` under the Daybreak Blue cyber program. Access-gated. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-sol` / `gpt-5.6-terra` | Previous generation. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-luna` | Previous generation, fast. | low → xhigh, `max` |
 | `gpt-5.5` | Older generation. | low → xhigh |
 
 Default: **`gpt-6.1-sol` at `high`**.
 
-**Daybreak builds are preferred.** On an account approved for Daybreak Blue,
-a job on a model that has a Daybreak build runs as that build. Today that means
-`gpt-5.6-sol` runs as `gpt-daybreak-blue-latest`, which OpenAI documents as the
-same snapshot under the Daybreak program. The GPT-6 models are left alone.
-`gpt-6.1-sol` and `gpt-6-astra` get Daybreak only with Daybreak Red approval,
-so their catalog entries list just the standard program. `gpt-6-sol` is
-OpenAI's mainline Daybreak Blue model, but `codex exec` cannot put it there:
-the Codex desktop app applies Daybreak per turn over the app-server protocol,
-and `exec` has no equivalent. `CODEX_PREFER_DAYBREAK=false` turns the swap off.
+**Daybreak is applied where the account has it.** Daybreak Blue is a cyber
+access program, and on an approved account the live catalog says which models
+it covers. Two models use it:
+
+- **`gpt-6-sol` runs as itself under Daybreak Blue.** It is OpenAI's mainline
+  Daybreak Blue model. `codex exec` cannot request a program, so these jobs run
+  over `codex app-server`, the protocol the Codex desktop app uses. Its field
+  for this is experimental, so the job's verification reads codex's own record
+  of the turn and fails if Daybreak was not applied.
+- **`gpt-5.6-sol` runs as `gpt-daybreak-blue-latest`**, which OpenAI documents
+  as the same snapshot under the program.
+
+Every other model is left alone. `gpt-6.1-sol` and `gpt-6-astra` get Daybreak
+only with Daybreak Red approval, so their catalog entries list just the
+standard program. Each job reports `cyber_access_program`, so you can see
+whether Daybreak applied. `CODEX_PREFER_DAYBREAK=false` turns all of this off
+for new jobs; a follow-up keeps its thread's model and Daybreak setting unless
+you pass `model`.
 
 GPT-6.1 Sol needs **codex-cli 0.159 or newer**, and GPT-6 Sol and Luna need
 0.156 or newer; older CLIs don't list them. Run `codex update`.
@@ -86,7 +95,7 @@ Things that will bite you if you don't know them — all enforced by the server:
   neither `max` nor `ultra`. An invalid pair is rejected up front rather than
   failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
+- **5.6 Sol and `gpt-daybreak-blue-latest` default to `low`** and are strong there. Start lower than
   you'd think.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.
@@ -131,6 +140,7 @@ compares the repo against a snapshot taken before the run:
 | `read_only_respected` | read-only job | `fail` if files changed anyway |
 | `verify_command` | you passed one | `fail` on a non-zero exit — the real one, from your own tests |
 | `git_tracking` | not a git repo | `skip` — nothing could be inspected, so `verified` comes back `null` rather than `true` |
+| `cyber_access_program` | Daybreak job (`cyber_access_program` set) | `fail` if codex's rollout shows the turn ran without the program; `skip` if the rollout could not be read |
 
 `verified` has three states, because "clean" and "unchecked" are different
 claims and a boolean cannot tell them apart:
@@ -290,7 +300,7 @@ a restart.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CODEX_MODEL` | `gpt-6.1-sol` | Default model slug |
-| `CODEX_PREFER_DAYBREAK` | `true` | Run a model as its Daybreak build when the account's live catalog has one |
+| `CODEX_PREFER_DAYBREAK` | `true` | Run `gpt-6-sol` and `gpt-5.6-sol` under Daybreak Blue when the account's live catalog offers it |
 | `CODEX_EFFORT` | `high` | Default reasoning effort |
 | `CODEX_TIMEOUT` | `4500` | Per-job timeout, seconds |
 | `CODEX_FOCUS` | `all` | Review focus: `bugs`, `security`, `performance`, `all` |
@@ -404,6 +414,9 @@ server.py ──► jobs/<id>.json          (job record; atomic writes)
     │       ├─► codex exec --model gpt-6.1-sol -c model_reasoning_effort="high"
     │       │     --sandbox read-only --json -o <out>    (runs IN your repo)
     │       │        │ streams JSONL events → phase, thread_id, token usage
+    │       │   or, for a Daybreak job only:
+    │       ├─► codex app-server   (JSON-RPC; turn/start with cyberAccessProgram)
+    │       │        │ notifications translated to the same events
     │       │        ▼
     │       └─► verify.py  ──► git snapshot diff + your verify_command
     │
@@ -413,10 +426,15 @@ codex_status / codex_result ◄── job record
 
 Notes on the implementation, since they're the non-obvious parts:
 
-- **`codex exec`, not `codex app-server`.** The app-server protocol is marked
-  experimental and versioned; OpenAI's own plugin carries compatibility shims
-  for its drift. `exec` is the stable public interface and — verified, contrary
-  to its docs — supports `--output-schema` for structured output.
+- **`codex exec`, except for Daybreak on `gpt-6-sol`.** The app-server
+  protocol is marked experimental and versioned; OpenAI's own plugin carries
+  compatibility shims for its drift. `exec` is the stable public interface and
+  — verified, contrary to its docs — supports `--output-schema` for structured
+  output. Only app-server can request a cyber program per turn, so Daybreak
+  jobs on `gpt-6-sol` use it, through a thin translator that shares the exec
+  path's supervision, timeout and error handling. Verification then checks
+  codex's rollout, because the protocol never confirms the program was
+  applied.
 - **The prompt goes over stdin, never argv.** Task text routinely contains
   backticks and `$()`. No shell is invoked for codex at all.
 - **Workers detach to init.** A zombie child still answers `kill(pid, 0)`, which

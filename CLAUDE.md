@@ -21,15 +21,20 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`server.py`** — FastMCP server. Registers the nine tools, validates requests,
   spawns workers, formats JSON responses. Runs via stdio transport.
 - **`codex_runner.py`** — Builds codex argv and prompts; runs codex while
-  streaming its `--json` event log. Typed errors (`CodexError`,
+  streaming its `--json` event log. Owns the supervision, event handling and
+  failure classification both transports share. Typed errors (`CodexError`,
   `CodexRateLimitError`, `CodexNotFoundError`, `CodexAuthError`).
+- **`app_server.py`** — The Daybreak transport: runs one turn over
+  `codex app-server` with a cyber access program, translating its
+  notifications into exec events. Used only for `DAYBREAK_PROGRAM_MODELS`.
 - **`models.py`** — Live model catalog from `codex debug models` (5-min cache,
   static fallback) plus per-model effort validation.
 - **`jobs.py`** — On-disk job store: atomic writes, prefix resolution, pruning,
   and reconciliation of jobs whose worker died.
 - **`worker.py`** — Detached per-job worker. Daemonizes, runs codex, verifies,
   records the terminal state.
-- **`verify.py`** — Git-grounded verification and the `verify_command` runner.
+- **`verify.py`** — Git-grounded verification, the `verify_command` runner,
+  and the rollout check that a Daybreak job really ran under Daybreak.
 - **`config.py`** — Live-reloaded config via `classproperty`, plus
   `subprocess_env()`.
 - **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
@@ -78,12 +83,18 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
   reader never sees EOF, so the watchdog fires and `run_codex` blocks on
   anyway, job pinned at `running` with its deadline long past. Reaping the
   group closes the pipe. `codex_cancel` reaches codex through
-  `reap_orphan_codex` (which targets codex's own pgid), and the worker's
-  SIGTERM handler unwinds into `run_codex`'s cleanup, so both paths still
-  cover it.
-- **`codex exec`, not `codex app-server`.** The app-server protocol is
-  experimental and versioned. `exec` is stable and supports `--output-schema`
-  despite the published config reference claiming otherwise.
+  `reap_orphan_codex` (which targets codex's own pgid, and recognizes codex by
+  the job id in its argv or by the start-time token recorded at spawn), and
+  the worker's SIGTERM handler unwinds into `codex_runner.supervise`'s cleanup,
+  so both paths still cover it.
+- **`codex exec`, except where only `codex app-server` will do.** The
+  app-server protocol is experimental and versioned. `exec` is stable and
+  supports `--output-schema` despite the published config reference claiming
+  otherwise. The one exception is a Daybreak Blue job on a model in
+  `DAYBREAK_PROGRAM_MODELS`: only app-server can request a cyber program per
+  turn. `app_server.py` is a thin translator onto codex_runner's shared code,
+  and the worker verifies from the rollout that the program was applied. If
+  `exec` ever gains an access-program flag, delete it.
 - **Prompts go over stdin (`-`), never argv.** Task text routinely contains
   backticks and `$()`. No shell is invoked for codex.
 - **Config is live-reloaded**: `Config` re-reads `.env` on every property access,
@@ -116,15 +127,23 @@ before assuming.
   `available_access_programs.cyber` lists `daybreak_blue` on nearly every model.
   The desktop app applies it per turn via app-server
   `turn/start.cyberAccessProgram` (its `[desktop.daybreak-enabled]` toggle).
-  `exec` has no flag or config key for it, and `-c cyber_access_program=...` is
-  silently ignored (the rollout's `turn_context` records
-  `cyber_access_program: null`). Under `exec`, only the
+  `exec` has no flag or config key for it: `-c cyber_access_program=...` and
+  the desktop toggle are both silently ignored (the rollout's `turn_context`
+  records `cyber_access_program: null`). Under `exec`, only the
   `gpt-daybreak-blue-latest` slug gets Daybreak, and it is `gpt-5.6-sol`
-  (developers.openai.com model page). Why no GPT-6 model gets a Daybreak swap
-  is recorded above `DAYBREAK_VARIANTS` in `models.py`. The catalog does not
-  say which base the Daybreak slug uses and `-latest` moves, so re-check
-  `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red automatically: it
-  is a separate, offensive-security approval.
+  (developers.openai.com model page). The catalog does not say which base the
+  Daybreak slug uses and `-latest` moves, so re-check `DAYBREAK_VARIANTS` on
+  upgrade. Never route Daybreak Red automatically: it is a separate,
+  offensive-security approval.
+- **app-server Daybreak needs `experimentalApi`.** Without that `initialize`
+  capability, `turn/start.cyberAccessProgram` does not exist. Its values are
+  camelCase (`daybreakBlue`), unlike the catalog and rollout (`daybreak_blue`).
+  The protocol never echoes the applied program; the rollout's `turn_context`
+  is the only record, which is why verification reads it. A refused program is
+  a 403, retried five times, then a failed turn. It is never a quiet downgrade.
+  The catalog's per-model `available_access_programs.cyber` predicts it
+  exactly. After a CLI upgrade, run a real Daybreak job and confirm its
+  `cyber_access_program` check passes.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.
@@ -149,7 +168,7 @@ All optional; configured in `.env` (see `.env.example`). The older
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `CODEX_MODEL` | `gpt-6.1-sol` | Validated against the live catalog |
-| `CODEX_PREFER_DAYBREAK` | `true` | Swap a model for its Daybreak build (`DAYBREAK_VARIANTS`) when the live catalog lists it |
+| `CODEX_PREFER_DAYBREAK` | `true` | Run a model under Daybreak Blue when the live catalog offers it: swapped for its slug (`DAYBREAK_VARIANTS`) or with the program requested per turn (`DAYBREAK_PROGRAM_MODELS`) |
 | `CODEX_EFFORT` | `high` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
 | `CODEX_TIMEOUT` | `4500` | Seconds; repo-aware work takes 10-20 min, `ultra` longer |
 | `CODEX_FOCUS` | `all` | `bugs`/`security`/`performance`/`all` |

@@ -461,6 +461,51 @@ class TestCodex0159Catalog:
         assert "gpt-6.1-sol" not in models.DAYBREAK_VARIANTS
 
 
+def _with_programs(entry, *programs):
+    return {**entry, "available_access_programs": {"cyber": list(programs)}}
+
+
+# How the primary (Daybreak-approved) account's 0.159.2 catalog lists programs.
+SAMPLE_DAYBREAK_ACCOUNT = {"models": [
+    _with_programs(_entry("gpt-6.1-sol", _ALL), "standard"),
+    _with_programs(_entry("gpt-6-sol", _ALL), "standard", "daybreak_blue"),
+    _with_programs(_entry("gpt-6-luna", _ALL[:-1]), "standard", "daybreak_blue"),
+]}
+
+
+class TestDaybreakProgram:
+    def test_catalog_carries_cyber_access_programs(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
+        catalog = models.get_catalog()
+        assert catalog["gpt-6-sol"]["cyber_access_programs"] == ["standard", "daybreak_blue"]
+        assert models.describe()["models"]["gpt-6.1-sol"]["cyber_access_programs"] == [
+            "standard"]
+
+    def test_gpt6_sol_gets_daybreak_blue_where_the_catalog_offers_it(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
+        assert models.daybreak_program("gpt-6-sol") == "daybreak_blue"
+
+    def test_none_when_the_account_is_not_approved(self, monkeypatch):
+        payload = {"models": [_with_programs(_entry("gpt-6-sol", _ALL), "standard")]}
+        _stub_codex(monkeypatch, json.dumps(payload))
+        assert models.daybreak_program("gpt-6-sol") is None
+
+    def test_only_listed_models_use_the_program(self, monkeypatch):
+        # Luna is offered Daybreak too, but running it over the experimental
+        # app-server transport is not worth it; the list keeps that confined.
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
+        assert models.daybreak_program("gpt-6-luna") is None
+        assert models.daybreak_program("gpt-6.1-sol") is None
+
+    def test_never_taken_from_the_fallback(self, monkeypatch):
+        monkeypatch.setattr(models.shutil, "which", lambda _: None)
+        assert models.daybreak_program("gpt-6-sol") is None
+
+    def test_program_and_variant_models_do_not_overlap(self):
+        # Each model reaches Daybreak one way; the server tries the slug first.
+        assert not set(models.DAYBREAK_PROGRAM_MODELS) & set(models.DAYBREAK_VARIANTS)
+
+
 class TestDaybreakVariant:
     def test_found_in_a_live_catalog(self, monkeypatch):
         _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))

@@ -40,32 +40,39 @@ Don't ask the user — choose, then say what you chose and why.
 | Extraction, classification, structured summaries, easy tasks | `gpt-6-luna` | `low`–`medium` |
 | Ordinary engineering: implement, fix, refactor, test | `gpt-6.1-sol` | `high`–`xhigh` |
 | Code review | `gpt-6.1-sol` | `high`–`xhigh` |
-| Security review, vulnerability hunting, hardening | `gpt-daybreak-blue-latest` | `high`–`xhigh` |
+| Security review, vulnerability hunting, hardening | `gpt-6-sol` (runs under Daybreak Blue) | `high`–`xhigh` |
 | Ambiguous, high-value, or genuinely hard problems | `gpt-6.1-sol` | `xhigh`–`max` |
 | Complex, demanding work where you want the best model | `gpt-6-astra` | `high`–`max` |
 | Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-6.1-sol` | `ultra` |
 
-**Daybreak builds are applied for you.** On an approved account the server
-runs `gpt-5.6-sol` as `gpt-daybreak-blue-latest`, the same snapshot under the
-Daybreak cyber program. Don't swap GPT-6 work to Daybreak to "get security
-awareness": the Daybreak slug is a generation behind GPT-6. Name it
-explicitly only for security work, as the table says. The GPT-6 models get
-no Daybreak through this server: Daybreak on `gpt-6.1-sol` and `gpt-6-astra`
-needs Daybreak Red approval, and `gpt-6-sol`'s Daybreak Blue mode is an access
-program that `codex exec` cannot request.
+**Daybreak is applied for you.** On an approved account the server runs
+`gpt-6-sol` under the Daybreak Blue cyber program, and `gpt-5.6-sol` as
+`gpt-daybreak-blue-latest` (the same snapshot under the program). Route
+security work to `gpt-6-sol`, as the table says, and leave other work on
+`gpt-6.1-sol`: Daybreak only changes how the model handles security work.
+`gpt-6.1-sol` and `gpt-6-astra` get no Daybreak here, because it needs Daybreak
+Red approval on them.
+
+The launch response's `cyber_access_program` says whether Daybreak applied.
+`null` on a `gpt-6-sol` job means it runs with standard safeguards: the
+account isn't approved, the live catalog couldn't be read, or
+`CODEX_PREFER_DAYBREAK=false`. Tell the user rather than implying otherwise. A
+finished Daybreak job's `verification` includes a `cyber_access_program`
+check, read from codex's own record of the turn.
 
 Constraints that are enforced, not advisory:
 
 - **Effort validity is per-model.** The Luna models have no `ultra`. `gpt-5.5`
   tops out at `xhigh` — no `max`, no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
-- **5.6 Sol and Daybreak are strong at low effort.** Start lower than
-  instinct suggests; their own default is `low`.
-- **Daybreak Blue is access-gated.** It is the defensive-security model, and it
-  exists only on approved accounts. Check `codex_models` before routing to it,
-  and fall back to `gpt-6.1-sol` if the catalog does not list it.
+- **5.6 Sol and `gpt-daybreak-blue-latest` are strong at low effort.** Start
+  lower than instinct suggests; their own default is `low`.
+- **Daybreak Blue is access-gated.** It exists only on approved accounts. In
+  `codex_models`, `gpt-6-sol`'s `cyber_access_programs` lists `daybreak_blue`
+  where the account has it. Where it doesn't, route security work to
+  `gpt-6.1-sol` instead: `gpt-6-sol` without Daybreak is just the older model.
 - **Always use the full slug.** Bare `gpt-5.6` fails under ChatGPT auth, and
-  Daybreak's slug really does end in `-latest`.
+  the Daybreak slug really does end in `-latest`.
 
 Call `codex_models` for the live catalog when unsure — it reflects the account,
 not this document.

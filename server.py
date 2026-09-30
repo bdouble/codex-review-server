@@ -137,37 +137,45 @@ def _conflict_message(conflict: dict, project_dir: str, write: bool) -> str:
     )
 
 
-def _prefer_daybreak(model: str) -> str:
-    """Swap in the model's Daybreak build when the account has one.
+def _prefer_daybreak(model: str) -> tuple[str, str | None]:
+    """Run the model under Daybreak when the account has it for that model.
 
-    Same base model, run under the security-aware Daybreak program, so this is
-    a substitution rather than a routing decision: a model with no entry in
-    models.DAYBREAK_VARIANTS, which today is every GPT-6 model, stays as it is.
-    CODEX_PREFER_DAYBREAK=false turns it off.
+    Returns (model, cyber_access_program). Same base model, run under the
+    security-aware Daybreak program, so this is a substitution rather than a
+    routing decision. A model gets it one of two ways (see models.py): swapped
+    for a dedicated Daybreak slug, or kept and run with the program requested
+    per turn. A model with neither stays as it is. CODEX_PREFER_DAYBREAK=false
+    turns it off.
     """
-    if Config.PREFER_DAYBREAK:
-        return models.daybreak_variant(model, Config.CODEX_HOME) or model
-    return model
+    if not Config.PREFER_DAYBREAK:
+        return model, None
+    variant = models.daybreak_variant(model, Config.CODEX_HOME)
+    if variant:
+        return variant, None
+    return model, models.daybreak_program(model, Config.CODEX_HOME)
 
 
 def _resolve_settings(
-    model: str, effort: str, keep_model: bool = False
-) -> tuple[str, str, str | None]:
-    """Resolve model/effort against config and the live catalog.
+    model: str, effort: str, inherited: tuple[str, str | None] | None = None
+) -> tuple[str, str, str | None, str | None]:
+    """Resolve model, effort and cyber program against config and the catalog.
 
-    keep_model skips the Daybreak swap, for a follow-up inheriting the model
-    its thread already ran on.
+    Returns (model, effort, cyber_access_program, validation_error).
+    `inherited` is the (model, program) a follow-up's thread already ran on;
+    it is kept as it is, with no Daybreak swap.
     """
-    chosen_model = model or Config.MODEL
-    if not keep_model:
-        chosen_model = _prefer_daybreak(chosen_model)
+    if inherited:
+        chosen_model, program = inherited
+    else:
+        chosen_model, program = _prefer_daybreak(model or Config.MODEL)
     chosen_effort = effort or Config.EFFORT
     error = models.validate(chosen_model, chosen_effort, Config.CODEX_HOME)
-    return chosen_model, chosen_effort, error
+    return chosen_model, chosen_effort, program, error
 
 
 def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
-            timeout: int, verify_timeout: int = 0, keep_model: bool = False,
+            timeout: int, verify_timeout: int = 0,
+            inherited: tuple[str, str | None] | None = None,
             **request_fields) -> str:
     """Validate, create a job, and spawn its worker."""
     try:
@@ -202,7 +210,9 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             f"for work in an ordinary directory.",
         )
 
-    chosen_model, chosen_effort, error = _resolve_settings(model, effort, keep_model)
+    chosen_model, chosen_effort, program, error = _resolve_settings(
+        model, effort, inherited
+    )
     if error:
         return _error("invalid_model", error)
 
@@ -222,6 +232,7 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
         "project_dir": project_dir,
         "model": chosen_model,
         "effort": chosen_effort,
+        "cyber_access_program": program,
         "sandbox": "workspace-write" if write else "read-only",
         "write": write,
         "timeout": effective_timeout,
@@ -255,6 +266,7 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
         "kind": kind,
         "model": chosen_model,
         "effort": chosen_effort,
+        "cyber_access_program": program,
         "sandbox": request["sandbox"],
         "project_dir": project_dir,
         "next_step": (
@@ -278,6 +290,7 @@ def _summarize(record: dict) -> dict:
         "phase": record.get("phase"),
         "model": record.get("model"),
         "effort": record.get("effort"),
+        "cyber_access_program": record.get("request", {}).get("cyber_access_program"),
         "project_dir": record.get("project_dir"),
         "elapsed_seconds": elapsed,
         "thread_id": record.get("thread_id"),
@@ -320,9 +333,11 @@ def codex_delegate(
         task: The complete task. Be specific about what "done" means — Codex
             cannot ask clarifying questions mid-run.
         project_dir: Absolute path to the working directory.
-        model: Model slug (e.g. "gpt-6.1-sol"). Defaults to CODEX_MODEL. A model
-            with a Daybreak build the account can use (gpt-5.6-sol) runs as
-            that build. Call codex_models for the live catalog.
+        model: Model slug (e.g. "gpt-6.1-sol"). Defaults to CODEX_MODEL. Runs
+            under Daybreak Blue when the account has it for that model:
+            gpt-6-sol runs as itself with the program applied, gpt-5.6-sol
+            as gpt-daybreak-blue-latest. The response's cyber_access_program
+            says which. Call codex_models for the live catalog.
         effort: low|medium|high|xhigh|max|ultra. Defaults to CODEX_EFFORT.
             "ultra" (not on Luna or 5.5) runs several agents in parallel — slow, for
             genuinely hard problems.
@@ -380,7 +395,8 @@ def codex_follow_up(
         job_id: The job to continue (full id or unique prefix).
         task: The follow-up instruction.
         write: True to allow file edits on this turn.
-        model: Override the model (defaults to the original job's).
+        model: Override the model. Defaults to the original job's model and
+            Daybreak setting.
         effort: Override the effort (defaults to the original job's).
         verify_command: Shell command to check the work afterwards.
         verify_timeout: Seconds to allow verify_command (default 900).
@@ -419,9 +435,12 @@ def codex_follow_up(
     return _launch(
         kind="follow_up",
         project_dir=record["project_dir"],
-        model=model or record.get("model", ""),
+        model=model,
         effort=effort or record.get("effort", ""),
-        keep_model=not model,
+        inherited=None if model else (
+            record.get("model", ""),
+            record.get("request", {}).get("cyber_access_program"),
+        ),
         write=write,
         timeout=timeout,
         task=task,
@@ -589,13 +608,17 @@ def codex_models() -> str:
     "ultra", and gpt-5.5 tops out at "xhigh".
 
     Returns:
-        JSON catalog with each model's description, efforts and default
-        effort, plus known-deprecated slugs.
+        JSON catalog with each model's description, efforts, default effort
+        and cyber_access_programs (daybreak_blue where the account may run
+        that model under Daybreak Blue), plus known-deprecated slugs and the
+        configured default.
     """
     catalog = models.describe(Config.CODEX_HOME)
+    default_model, default_program = _prefer_daybreak(Config.MODEL)
     catalog["configured_default"] = {
-        "model": _prefer_daybreak(Config.MODEL),
+        "model": default_model,
         "effort": Config.EFFORT,
+        "cyber_access_program": default_program,
     }
     return json.dumps(catalog, indent=2)
 
@@ -625,8 +648,8 @@ def codex_review(
         base_branch: Branch or commit to compare against (default: "main").
         focus: "bugs", "security", "performance", or "all".
         context: Additional context (ticket description, acceptance criteria).
-        model: Model slug. Defaults to CODEX_MODEL; swapped for its Daybreak
-            build when the account has one.
+        model: Model slug. Defaults to CODEX_MODEL; runs under Daybreak Blue
+            when the account has it for that model (see codex_delegate).
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
 
@@ -669,8 +692,8 @@ def codex_review_and_fix(
         base_branch: Branch or commit to compare against (default: "main").
         focus: "bugs", "security", "performance", or "all".
         context: Additional context (ticket description, acceptance criteria).
-        model: Model slug. Defaults to CODEX_MODEL; swapped for its Daybreak
-            build when the account has one.
+        model: Model slug. Defaults to CODEX_MODEL; runs under Daybreak Blue
+            when the account has it for that model (see codex_delegate).
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         verify_command: Shell command to run afterwards (e.g. "pytest -q").
         timeout: Seconds. Defaults to CODEX_TIMEOUT.
@@ -710,8 +733,8 @@ def codex_fix(
         project_dir: Absolute path to the project repository.
         findings: The findings to fix (from codex_review, filtered by the user).
         context: Guidance on approach, constraints, or preferences.
-        model: Model slug. Defaults to CODEX_MODEL; swapped for its Daybreak
-            build when the account has one.
+        model: Model slug. Defaults to CODEX_MODEL; runs under Daybreak Blue
+            when the account has it for that model (see codex_delegate).
         effort: Reasoning effort. Defaults to CODEX_EFFORT.
         verify_command: Shell command to run afterwards (e.g. "pytest -q").
         timeout: Seconds. Defaults to CODEX_TIMEOUT.

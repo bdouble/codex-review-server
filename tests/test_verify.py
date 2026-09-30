@@ -1,5 +1,6 @@
 """Tests for git-grounded verification."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -326,3 +327,55 @@ class TestNumstatTabs:
         # and produced a phantom entry named "ta".
         stats = verify._numstat_fields("1\t0\tta\tb.py\0")
         assert stats == {"ta\tb.py": "1,0"}
+
+
+class TestCyberAccessProgramCheck:
+    """A Daybreak job is verified from codex's rollout, not from the request.
+
+    The protocol field is experimental; a CLI that dropped it could run the
+    turn without Daybreak and still succeed.
+    """
+
+    @staticmethod
+    def _rollout(tmp_path, *programs):
+        path = tmp_path / "rollout.jsonl"
+        lines = [json.dumps({"type": "session_meta", "payload": {}})]
+        lines += [json.dumps({"type": "turn_context",
+                              "payload": {"cyber_access_program": p}})
+                  for p in programs]
+        path.write_text("\n".join(lines) + "\n")
+        return str(path)
+
+    def _check(self, repo, rollout_path):
+        before = verify.snapshot(str(repo))
+        report = verify.verify(str(repo), before, write=False,
+                               cyber_access_program="daybreak_blue",
+                               rollout_path=rollout_path)
+        check = next(c for c in report["checks"] if c["name"] == "cyber_access_program")
+        return report, check
+
+    def test_passes_when_the_rollout_records_it(self, repo, tmp_path):
+        report, check = self._check(repo, self._rollout(tmp_path, "daybreak_blue"))
+        assert check["status"] == "pass"
+        assert report["verified"] is True
+
+    def test_fails_when_the_turn_ran_without_it(self, repo, tmp_path):
+        report, check = self._check(repo, self._rollout(tmp_path, None))
+        assert check["status"] == "fail"
+        assert report["verified"] is False
+
+    def test_the_latest_turn_decides(self, repo, tmp_path):
+        # A follow-up appends to its thread's rollout; only its own turn counts.
+        _, check = self._check(repo, self._rollout(tmp_path, "daybreak_blue", None))
+        assert check["status"] == "fail"
+
+    def test_unreadable_rollout_is_unchecked_not_failed(self, repo, tmp_path):
+        report, check = self._check(repo, str(tmp_path / "missing.jsonl"))
+        assert check["status"] == "skip"
+        assert report["verified"] is None
+
+    def test_absent_for_jobs_without_a_program(self, repo):
+        before = verify.snapshot(str(repo))
+        report = verify.verify(str(repo), before, write=False)
+        assert all(c["name"] != "cyber_access_program" for c in report["checks"])
+

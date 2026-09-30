@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import jobs
 import verify
+from app_server import run_codex_app_server
 from codex_runner import (
     CodexAuthError,
     CodexError,
@@ -131,10 +132,12 @@ def run(job_id: str) -> None:
             worker_pid=None,
         )
         return
+    program = request.get("cyber_access_program")
     jobs.append_log(
         job_id,
         f"Started {request.get('kind')} on {request.get('model')} "
-        f"(effort={request.get('effort')}, sandbox={request.get('sandbox')})",
+        f"(effort={request.get('effort')}, sandbox={request.get('sandbox')}"
+        + (f", {program} via app-server" if program else "") + ")",
     )
 
     schema_file = None
@@ -164,11 +167,23 @@ def run(job_id: str) -> None:
 
     def on_spawn(codex_pid):
         # Recorded immediately so a SIGKILLed worker still leaves enough behind
-        # for reconciliation to find and reap this codex process.
-        jobs.update_job(job_id, codex_pid=codex_pid)
+        # for reconciliation to find and reap this codex process. The start
+        # time is its identity: app-server's argv does not name the job.
+        jobs.update_job(
+            job_id,
+            codex_pid=codex_pid,
+            codex_token=jobs.process_start_token(codex_pid),
+        )
+
+    # Only a cyber program needs app-server; see app_server.py.
+    runner = run_codex
+    runner_args = {}
+    if program:
+        runner = run_codex_app_server
+        runner_args = {"cyber_access_program": program}
 
     try:
-        result = run_codex(
+        result = runner(
             project_dir=project_dir,
             prompt=_build_prompt(request),
             model=request["model"],
@@ -182,6 +197,7 @@ def run(job_id: str) -> None:
             resume_thread_id=request.get("resume_thread_id"),
             on_event=on_event,
             on_spawn=on_spawn,
+            **runner_args,
         )
     except CodexError as exc:
         # The sentinel file, not the record field — a concurrent phase write
@@ -222,6 +238,8 @@ def run(job_id: str) -> None:
             # records created before it was wired through.
             verify_timeout=request.get(
                 "verify_timeout") or verify.DEFAULT_VERIFY_TIMEOUT,
+            cyber_access_program=program,
+            rollout_path=result.get("rollout_path"),
         )
     except Exception as exc:  # noqa: BLE001
         verification = {
@@ -261,8 +279,9 @@ def _install_signal_handlers() -> None:
     finally blocks, no cleanup. Codex — our child — would survive, reparent to
     init, and keep editing files and burning quota with nobody reading it.
 
-    Raising instead lets run_codex's finally block terminate codex on the way
-    out. The job is left mid-flight, which reconciliation then settles.
+    Raising instead lets the runner's cleanup (codex_runner.supervise)
+    terminate codex on the way out. The job is left mid-flight, which
+    reconciliation then settles.
 
     (codex_cancel signals the whole process group, so codex already gets its
     own SIGTERM there. This covers a plain `kill <worker_pid>`, which reaches
