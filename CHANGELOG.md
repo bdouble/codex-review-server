@@ -5,6 +5,37 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] — 2026-09-30
+
+Support for **GPT-6.1 Sol**, now the default, verified against **codex-cli
+0.159.2**.
+
+### Added
+
+- **GPT-6.1 Sol (`gpt-6.1-sol`)** — the latest workhorse for coding and
+  everyday work, every effort up to `ultra`. Its catalog default effort is
+  `low`. Needs codex-cli 0.159 or newer; 0.156.1 does not list it, so run
+  `codex update`.
+
+### Changed
+
+- **Default is now `gpt-6.1-sol` at `high`** (was `gpt-6-sol`). An existing
+  `.env` that sets `CODEX_MODEL=gpt-6-sol` keeps 6 Sol until you change it.
+- `/codex:delegate` and `/codex:review` alias `sol` now means `gpt-6.1-sol`;
+  `gpt-6-sol` remains reachable by full slug. The delegation skill routes
+  ordinary engineering, review, and hard problems to 6.1 Sol.
+- Fallback catalog descriptions match the 0.159.2 catalog.
+
+### Unchanged: Daybreak
+
+- Security work still runs on `gpt-daybreak-blue-latest` (`gpt-5.6-sol` under
+  Daybreak Blue). 6.1 Sol gets no Daybreak swap: Daybreak on 6.1 Sol and on
+  6 Astra needs Daybreak Red approval, so their catalog entries list only the
+  standard program. `gpt-6-sol` is OpenAI's mainline Daybreak Blue model, but
+  only through the `access_programs.cyber` request field, which `codex exec`
+  still cannot set. A live run on 0.159.2 with
+  `-c cyber_access_program="daybreak_blue"` recorded no access program.
+
 ## [2.3.0] — 2026-09-23
 
 Support for **GPT-6 Sol** and **GPT-6 Luna**, verified against **codex-cli

@@ -95,7 +95,7 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
 
 ## Codex CLI Gotchas
 
-Re-verified against codex-cli 0.156.1 on 2026-09-23. These contradict parts of
+Re-verified against codex-cli 0.159.2 on 2026-09-30. These contradict parts of
 the published docs — trust the CLI, and re-verify with `codex exec --help`
 before assuming.
 
@@ -104,8 +104,9 @@ before assuming.
   `-c sandbox_mode="..."`.
 - **`-c` values are parsed as TOML**, so strings need quotes:
   `-c model_reasoning_effort='"xhigh"'`.
-- **GPT-6 Sol and Luna need codex-cli ≥ 0.156.** Older CLIs don't list them,
-  so validation against their catalog can't see them.
+- **GPT-6.1 Sol needs codex-cli ≥ 0.159; GPT-6 Sol and Luna need ≥ 0.156.**
+  Older CLIs don't list them, so validation against their catalog can't see
+  them.
 - **Effort support is per-model.** Luna (5.6 and 6) has no `ultra`; 5.5 has
   neither `max` nor `ultra`. Codex does not enforce this itself (6 Luna at
   `ultra` exits 0), so our up-front check is the only guard. `codex debug models` is
@@ -116,11 +117,15 @@ before assuming.
   The desktop app applies it per turn via app-server
   `turn/start.cyberAccessProgram` (its `[desktop.daybreak-enabled]` toggle).
   `exec` has no flag or config key for it, and `-c cyber_access_program=...` is
-  silently ignored. Under `exec`, only the `gpt-daybreak-blue-latest` slug gets
-  Daybreak, and it is `gpt-5.6-sol` (developers.openai.com model page). The
-  catalog does not say which base it uses and `-latest` moves, so re-check
-  `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red automatically: it is a
-  separate, offensive-security approval.
+  silently ignored (the rollout's `turn_context` records
+  `cyber_access_program: null`; checked live on 0.159.2). Under `exec`, only the
+  `gpt-daybreak-blue-latest` slug gets Daybreak, and it is `gpt-5.6-sol`
+  (developers.openai.com model page). Per OpenAI's Daybreak guide, `gpt-6-sol`
+  is the mainline Daybreak Blue model, while `gpt-6.1-sol` and `gpt-6-astra`
+  need Daybreak Red approval; their catalog entries list only `standard`. The
+  catalog does not say which base the Daybreak slug uses and `-latest` moves,
+  so re-check `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red
+  automatically: it is a separate, offensive-security approval.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.
@@ -144,7 +149,7 @@ All optional; configured in `.env` (see `.env.example`). The older
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `CODEX_MODEL` | `gpt-6-sol` | Validated against the live catalog |
+| `CODEX_MODEL` | `gpt-6.1-sol` | Validated against the live catalog |
 | `CODEX_PREFER_DAYBREAK` | `true` | Swap a model for its Daybreak build (`DAYBREAK_VARIANTS`) when the live catalog lists it |
 | `CODEX_EFFORT` | `high` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
 | `CODEX_TIMEOUT` | `4500` | Seconds; repo-aware work takes 10-20 min, `ultra` longer |

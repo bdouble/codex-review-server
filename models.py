@@ -16,12 +16,18 @@ import shutil
 import subprocess
 import time
 
-# Verified against codex-cli 0.156.1 on 2026-09-23 via `codex debug models`.
+# Verified against codex-cli 0.159.2 on 2026-09-30 via `codex debug models`.
 # Only used when the live query fails (codex missing, offline, format change).
 #
 # Entries here are a last-known-good snapshot, never an allow-list: the live
 # catalog is always preferred, and `validate` lets unknown slugs through.
 FALLBACK_CATALOG = {
+    "gpt-6.1-sol": {
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "default_effort": "low",
+        "display_name": "GPT-6.1-Sol",
+        "description": "Latest workhorse model for coding and everyday work.",
+    },
     "gpt-6-astra": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "medium",
@@ -32,7 +38,7 @@ FALLBACK_CATALOG = {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "medium",
         "display_name": "GPT-6-Sol",
-        "description": "Workhorse model for coding and everyday work.",
+        "description": "Previous generation workhorse model.",
     },
     "gpt-6-luna": {
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -44,13 +50,13 @@ FALLBACK_CATALOG = {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "low",
         "display_name": "GPT-5.6-Sol",
-        "description": "Older coding model for complex work.",
+        "description": "Older generation workhorse model.",
     },
     "gpt-5.6-terra": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "medium",
         "display_name": "GPT-5.6-Terra",
-        "description": "Pragmatic all-rounder for everyday engineering.",
+        "description": "Older balanced model for straightforward work.",
     },
     "gpt-5.6-luna": {
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -72,7 +78,7 @@ FALLBACK_CATALOG = {
         "efforts": ["low", "medium", "high", "xhigh"],
         "default_effort": "medium",
         "display_name": "GPT-5.5",
-        "description": "Previous-generation all-rounder.",
+        "description": "Legacy coding model.",
     },
 }
 
@@ -102,8 +108,13 @@ ALIAS_HINTS = {
 # (`turn/start.cyberAccessProgram`); `exec` has no flag or config key for it.
 # Under exec, the dedicated slug is the only route, and it is one specific model:
 # per developers.openai.com, gpt-daybreak-blue-latest points at the gpt-5.6-sol
-# snapshot (checked 2026-09-23). The catalog does not say this, and `-latest`
+# snapshot (checked 2026-09-30). The catalog does not say this, and `-latest`
 # moves, so re-check it after each CLI upgrade.
+#
+# gpt-6.1-sol, the default, has no entry and cannot get one: its catalog entry
+# lists only the `standard` cyber program, because Daybreak on 6.1 Sol (and on
+# 6 Astra) needs Daybreak Red approval. gpt-6-sol is OpenAI's mainline Daybreak
+# Blue model, but only through `access_programs.cyber`, which exec cannot set.
 DAYBREAK_VARIANTS = {
     "gpt-5.6-sol": "gpt-daybreak-blue-latest",
 }

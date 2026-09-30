@@ -27,7 +27,7 @@ diff is empty, say so and stop rather than launching a run that finds nothing.
 - `--fix` → `codex_review_and_fix` (auto-fixes only clear-cut P0-P2; anything
   ambiguous comes back as a question).
 
-`--model` takes the same aliases as `/codex:delegate`: `sol` → `gpt-6-sol`,
+`--model` takes the same aliases as `/codex:delegate`: `sol` → `gpt-6.1-sol`,
 `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`, `daybreak` →
 `gpt-daybreak-blue-latest`. A full slug also works.
 

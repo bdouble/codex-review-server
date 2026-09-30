@@ -56,26 +56,29 @@ Durable capability tiers rather than a version list:
 
 | Model | Best for | Efforts |
 |-------|----------|---------|
+| `gpt-6.1-sol` | The latest workhorse for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
 | `gpt-6-astra` | Frontier intelligence for the most demanding work. | low → xhigh, `max`, `ultra` |
-| `gpt-6-sol` | The workhorse for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
+| `gpt-6-sol` | Previous-generation workhorse. | low → xhigh, `max`, `ultra` |
 | `gpt-6-luna` | Fast and affordable, for easier tasks. | low → xhigh, `max` |
 | `gpt-daybreak-blue-latest` | `gpt-5.6-sol` under the Daybreak Blue cyber program; defensive security work. Access-gated. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-sol` / `gpt-5.6-terra` | Previous generation. | low → xhigh, `max`, `ultra` |
 | `gpt-5.6-luna` | Previous generation, fast. | low → xhigh, `max` |
 | `gpt-5.5` | Older generation. | low → xhigh |
 
-Default: **`gpt-6-sol` at `high`**.
+Default: **`gpt-6.1-sol` at `high`**.
 
 **Daybreak builds are preferred.** On an account approved for Daybreak Blue,
 a job on a model that has a Daybreak build runs as that build. Today that means
 `gpt-5.6-sol` runs as `gpt-daybreak-blue-latest`, which OpenAI documents as the
-same snapshot under the Daybreak program. `gpt-6-sol` is left alone, because
-`codex exec` cannot reach a Daybreak build of it: the Codex desktop app applies
-Daybreak to most models per turn, but only over the app-server protocol, and
-`exec` has no equivalent. `CODEX_PREFER_DAYBREAK=false` turns the swap off.
+same snapshot under the Daybreak program. The GPT-6 models are left alone.
+`gpt-6.1-sol` and `gpt-6-astra` get Daybreak only with Daybreak Red approval,
+so their catalog entries list just the standard program. `gpt-6-sol` is
+OpenAI's mainline Daybreak Blue model, but `codex exec` cannot put it there:
+the Codex desktop app applies Daybreak per turn over the app-server protocol,
+and `exec` has no equivalent. `CODEX_PREFER_DAYBREAK=false` turns the swap off.
 
-GPT-6 Sol and Luna need **codex-cli 0.156 or newer**; older CLIs don't list
-them. Run `codex update`.
+GPT-6.1 Sol needs **codex-cli 0.159 or newer**, and GPT-6 Sol and Luna need
+0.156 or newer; older CLIs don't list them. Run `codex update`.
 
 Things that will bite you if you don't know them — all enforced by the server:
 
@@ -83,7 +86,7 @@ Things that will bite you if you don't know them — all enforced by the server:
   neither `max` nor `ultra`. An invalid pair is rejected up front rather than
   failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
+- **6.1 Sol, 5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
   you'd think.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.
@@ -286,7 +289,7 @@ a restart.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | `gpt-6-sol` | Default model slug |
+| `CODEX_MODEL` | `gpt-6.1-sol` | Default model slug |
 | `CODEX_PREFER_DAYBREAK` | `true` | Run a model as its Daybreak build when the account's live catalog has one |
 | `CODEX_EFFORT` | `high` | Default reasoning effort |
 | `CODEX_TIMEOUT` | `4500` | Per-job timeout, seconds |
@@ -398,7 +401,7 @@ server.py ──► jobs/<id>.json          (job record; atomic writes)
     │
     ├─► worker.py (detached, reparented to init)
     │       │
-    │       ├─► codex exec --model gpt-6-sol -c model_reasoning_effort="high"
+    │       ├─► codex exec --model gpt-6.1-sol -c model_reasoning_effort="high"
     │       │     --sandbox read-only --json -o <out>    (runs IN your repo)
     │       │        │ streams JSONL events → phase, thread_id, token usage
     │       │        ▼

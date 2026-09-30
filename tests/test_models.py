@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config
 import models
 
 SAMPLE = {
@@ -427,6 +428,36 @@ class TestCodex0156Catalog:
     def test_fallback_carries_gpt6_sol_and_luna(self):
         assert "ultra" in models.FALLBACK_CATALOG["gpt-6-sol"]["efforts"]
         assert "ultra" not in models.FALLBACK_CATALOG["gpt-6-luna"]["efforts"]
+
+
+# codex-cli 0.159.2, verified live on 2026-09-30. 0.156.1 does not list
+# gpt-6.1-sol, and its catalog entry offers only the `standard` cyber program.
+SAMPLE_0159 = {"models": [
+    {**_entry("gpt-6.1-sol", _ALL), "default_reasoning_level": "low"},
+    *SAMPLE_0156["models"],
+]}
+
+
+class TestCodex0159Catalog:
+    def test_gpt6_1_sol_is_listed_with_every_effort(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0159))
+        catalog = models.get_catalog()
+        assert catalog["gpt-6.1-sol"]["default_effort"] == "low"
+        assert models.validate("gpt-6.1-sol", "ultra") is None
+
+    def test_fallback_carries_gpt6_1_sol(self):
+        entry = models.FALLBACK_CATALOG["gpt-6.1-sol"]
+        assert "ultra" in entry["efforts"]
+        assert entry["default_effort"] == "low"
+
+    def test_default_model_is_gpt6_1_sol(self):
+        assert config.DEFAULT_MODEL == "gpt-6.1-sol"
+        assert config.DEFAULT_MODEL in models.FALLBACK_CATALOG
+
+    def test_gpt6_1_sol_has_no_daybreak_build(self, monkeypatch):
+        # Daybreak on 6.1 Sol needs Daybreak Red approval; exec cannot reach it.
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0159))
+        assert models.daybreak_variant("gpt-6.1-sol") is None
 
 
 class TestDaybreakVariant:
