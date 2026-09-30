@@ -4,12 +4,14 @@ Codex saying "done" is a claim, not a result. Both of the reference
 implementations for this pattern either trust the model's self-report or
 mandate verification in prose and never enforce it. This module checks the
 claim against the repository: what git says actually changed, and whether the
-project's own test command still passes.
+project's own test command still passes. For a Daybreak job it also checks,
+from codex's own rollout, that the cyber program was really applied.
 
 Every check is grounded in observable state, never in Codex's narration.
 """
 
 import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -312,12 +314,70 @@ def run_verify_command(command: str, project_dir: str,
     }
 
 
+def applied_cyber_program(rollout_path: str | None) -> str | None:
+    """The cyber program codex recorded for the thread's latest turn.
+
+    Read from the rollout's `turn_context` entries, the one place codex writes
+    down what it actually sent: the app-server protocol never echoes a turn's
+    program back. Raises OSError if the rollout cannot be read, and returns
+    None when no turn recorded a program.
+    """
+    if not rollout_path:
+        raise OSError("codex did not report the thread's rollout path")
+    applied = None
+    with open(rollout_path) as handle:
+        for line in handle:
+            if '"turn_context"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") == "turn_context":
+                applied = (entry.get("payload") or {}).get("cyber_access_program")
+    return applied
+
+
+def _cyber_program_check(expected: str, rollout_path: str | None) -> dict:
+    """Confirm the requested program was applied, rather than trusting it was.
+
+    The request field is experimental. A CLI that renamed or dropped it could
+    run the turn without Daybreak and still succeed, and nothing else would
+    notice.
+    """
+    try:
+        applied = applied_cyber_program(rollout_path)
+    except OSError as exc:
+        return {
+            "name": "cyber_access_program",
+            "status": "skip",
+            "detail": f"Could not confirm {expected} was applied: {exc}.",
+        }
+    if applied == expected:
+        return {
+            "name": "cyber_access_program",
+            "status": "pass",
+            "detail": f"Codex's rollout records {expected} for this turn.",
+        }
+    return {
+        "name": "cyber_access_program",
+        "status": "fail",
+        "detail": (
+            f"Requested {expected}, but codex's rollout records "
+            f"{applied or 'no program'}, so the job ran without it. The "
+            f"app-server protocol may have changed; see CLAUDE.md."
+        ),
+    }
+
+
 def verify(
     project_dir: str,
     before: dict,
     write: bool,
     verify_command: str = "",
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT,
+    cyber_access_program: str | None = None,
+    rollout_path: str | None = None,
 ) -> dict:
     """Compare post-task repository state against the pre-task snapshot.
 
@@ -423,6 +483,9 @@ def verify(
                     "status": "pass",
                     "detail": "No files changed, as expected for a read-only task.",
                 })
+
+    if cyber_access_program:
+        checks.append(_cyber_program_check(cyber_access_program, rollout_path))
 
     if verify_command:
         outcome = run_verify_command(verify_command, project_dir, verify_timeout)

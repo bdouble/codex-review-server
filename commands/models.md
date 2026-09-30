@@ -25,9 +25,10 @@ Worth calling out to the user when relevant:
 - **`ultra` coordinates several agents in parallel** — substantially slower and
   costlier, worth it only for genuinely hard problems.
 - **The catalog is per-account.** Access-gated models such as
-  `gpt-daybreak-blue-latest`, the defensive-security model, appear only where
-  they have been approved. A model missing from the list is not a bug. When
-  Daybreak Blue is listed, `gpt-5.6-sol` jobs run on it, since it is the same
-  snapshot under the Daybreak program.
+  `gpt-daybreak-blue-latest` appear only where they have been approved, and
+  each model's `cyber_access_programs` lists the programs the account may use
+  with it. A model missing from the list is not a bug. Where `gpt-6-sol` lists
+  `daybreak_blue`, its jobs run under Daybreak Blue; where the Daybreak slug
+  is listed, `gpt-5.6-sol` jobs run on it.
 - **Use the full slug.** The bare `gpt-5.6` alias does not resolve under
   ChatGPT-account auth.

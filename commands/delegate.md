@@ -20,7 +20,7 @@ $ARGUMENTS
 | Flag | Meaning |
 |---|---|
 | `--write` | Allow file edits (`write=True`). Without it the run is read-only. |
-| `--model` | `astra` → `gpt-6-astra`, `sol` → `gpt-6.1-sol`, `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`, `daybreak` → `gpt-daybreak-blue-latest`. A full slug also works (e.g. `gpt-6-sol`, `gpt-5.6-sol`). |
+| `--model` | `astra` → `gpt-6-astra`, `sol` → `gpt-6.1-sol`, `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`, `daybreak` → `gpt-6-sol`, which runs under Daybreak Blue where the account has it. A full slug also works (e.g. `gpt-daybreak-blue-latest`, `gpt-5.6-sol`). |
 | `--effort` | `low`…`xhigh`, plus `max` and `ultra`. Support is per-model; `codex_models` is the authority. |
 | `--verify` | Shell command to check the work, e.g. `--verify "pytest -q"`. |
 | `--wait` | Block until done instead of returning the job id. |

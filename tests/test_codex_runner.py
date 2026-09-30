@@ -535,3 +535,21 @@ class TestResetHintExtraction:
     def test_a_runaway_capture_is_bounded(self):
         text = "try again at " + "x" * 5000
         assert len(codex_runner._reset_hint(text)) < 200
+
+
+class TestDaybreakRefusals:
+    """The backend's two 403s for a requested cyber program (codex-cli 0.159.2)."""
+
+    def test_unapproved_account(self):
+        with pytest.raises(CodexError, match="refused Daybreak") as info:
+            _classify_failure("", (
+                '{"message": "unexpected status 403 Forbidden: The requested Cyber '
+                'access program is not authorized for this workspace."}'), 1)
+        assert not isinstance(info.value, CodexAuthError)
+
+    def test_model_without_daybreak_blue(self):
+        with pytest.raises(CodexError, match="CODEX_PREFER_DAYBREAK=false"):
+            _classify_failure("", (
+                '{"message": "unexpected status 403 Forbidden: {\\"detail\\":'
+                '\\"Daybreak isn\'t available for this model.\\"}"}'), 1)
+

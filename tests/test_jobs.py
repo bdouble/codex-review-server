@@ -252,7 +252,7 @@ class TestOrphanReaping:
     def test_reaps_codex_left_by_a_dead_worker(self, monkeypatch):
         # A SIGKILLed worker cannot stop codex; nothing else ever would.
         killed = []
-        monkeypatch.setattr(jobs, "_is_our_codex", lambda pid, job_id: True)
+        monkeypatch.setattr(jobs, "_is_our_codex", lambda pid, job_id, token="": True)
         monkeypatch.setattr(jobs.os, "getpgid", lambda pid: pid)
         monkeypatch.setattr(jobs.os, "killpg", lambda pgid, sig: killed.append(pgid))
         assert jobs.reap_orphan_codex({"id": "task-a-000000", "codex_pid": 5150})
@@ -268,6 +268,24 @@ class TestOrphanReaping:
         monkeypatch.setattr(jobs.os, "killpg", lambda *a: killed.append(a))
         assert not jobs.reap_orphan_codex({"id": "task-a-000000", "codex_pid": 5150})
         assert killed == []
+
+    def test_app_server_codex_is_matched_by_its_start_time(self, monkeypatch):
+        # `codex app-server` has no job id in its argv; without the token,
+        # cancelling a Daybreak job would leave codex running.
+        monkeypatch.setattr(
+            jobs, "_process_identity",
+            lambda pid: ("Wed Jul 15 10:00:00 2026", "/x/codex app-server"),
+        )
+        assert jobs._is_our_codex(5150, "task-a-000000", "Wed Jul 15 10:00:00 2026")
+        assert not jobs._is_our_codex(5150, "task-a-000000", "Wed Jul 15 09:00:00 2026")
+        assert not jobs._is_our_codex(5150, "task-a-000000")
+
+    def test_a_matching_start_time_is_not_enough_without_codex(self, monkeypatch):
+        monkeypatch.setattr(
+            jobs, "_process_identity",
+            lambda pid: ("Wed Jul 15 10:00:00 2026", "vim notes.txt"),
+        )
+        assert not jobs._is_our_codex(5150, "task-a-000000", "Wed Jul 15 10:00:00 2026")
 
     def test_no_codex_pid_is_a_no_op(self):
         assert not jobs.reap_orphan_codex({"id": "task-a-000000"})

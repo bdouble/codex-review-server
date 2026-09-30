@@ -29,8 +29,8 @@ diff is empty, say so and stop rather than launching a run that finds nothing.
 
 `--model` takes the same aliases as `/codex:delegate`: `astra` → `gpt-6-astra`,
 `sol` → `gpt-6.1-sol`, `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`,
-`daybreak` → `gpt-daybreak-blue-latest`. A full slug also works (e.g.
-`gpt-6-sol`).
+`daybreak` → `gpt-6-sol`, which runs under Daybreak Blue where the account has
+it. A full slug also works (e.g. `gpt-daybreak-blue-latest`).
 
 Reviews are worth real reasoning budget. Use `high` for a routine diff and
 `xhigh` for a substantial one; save `max` for a large or high-stakes diff.
