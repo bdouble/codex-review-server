@@ -82,7 +82,9 @@ it covers. Two models use it:
 Every other model is left alone. `gpt-6.1-sol` and `gpt-6-astra` get Daybreak
 only with Daybreak Red approval, so their catalog entries list just the
 standard program. Each job reports `cyber_access_program`, so you can see
-whether Daybreak applied. `CODEX_PREFER_DAYBREAK=false` turns all of this off.
+whether Daybreak applied. `CODEX_PREFER_DAYBREAK=false` turns all of this off
+for new jobs; a follow-up keeps its thread's model and Daybreak setting unless
+you pass `model`.
 
 GPT-6.1 Sol needs **codex-cli 0.159 or newer**, and GPT-6 Sol and Luna need
 0.156 or newer; older CLIs don't list them. Run `codex update`.
