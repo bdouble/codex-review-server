@@ -431,7 +431,7 @@ class TestCodex0156Catalog:
 
 
 # codex-cli 0.159.2, verified live on 2026-09-30. 0.156.1 does not list
-# gpt-6.1-sol, and its catalog entry offers only the `standard` cyber program.
+# gpt-6.1-sol.
 SAMPLE_0159 = {"models": [
     {**_entry("gpt-6.1-sol", _ALL), "default_reasoning_level": "low"},
     *SAMPLE_0156["models"],
@@ -454,10 +454,11 @@ class TestCodex0159Catalog:
         assert config.DEFAULT_MODEL == "gpt-6.1-sol"
         assert config.DEFAULT_MODEL in models.FALLBACK_CATALOG
 
-    def test_gpt6_1_sol_has_no_daybreak_build(self, monkeypatch):
-        # Daybreak on 6.1 Sol needs Daybreak Red approval; exec cannot reach it.
-        _stub_codex(monkeypatch, json.dumps(SAMPLE_0159))
-        assert models.daybreak_variant("gpt-6.1-sol") is None
+    def test_gpt6_1_sol_has_no_daybreak_build(self):
+        # Guards DAYBREAK_VARIANTS itself, which daybreak_variant consults
+        # before the catalog: Daybreak on 6.1 Sol needs Daybreak Red approval,
+        # so exec has no Daybreak build of it to swap in.
+        assert "gpt-6.1-sol" not in models.DAYBREAK_VARIANTS
 
 
 class TestDaybreakVariant:

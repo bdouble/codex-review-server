@@ -59,8 +59,8 @@ Constraints that are enforced, not advisory:
 - **Effort validity is per-model.** The Luna models have no `ultra`. `gpt-5.5`
   tops out at `xhigh` — no `max`, no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
-- **6.1 Sol, 5.6 Sol and Daybreak are strong at low effort.** Start lower
-  than instinct suggests; their own default is `low`.
+- **5.6 Sol and Daybreak are strong at low effort.** Start lower than
+  instinct suggests; their own default is `low`.
 - **Daybreak Blue is access-gated.** It is the defensive-security model, and it
   exists only on approved accounts. Check `codex_models` before routing to it,
   and fall back to `gpt-6.1-sol` if the catalog does not list it.

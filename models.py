@@ -111,7 +111,7 @@ ALIAS_HINTS = {
 # snapshot (checked 2026-09-30). The catalog does not say this, and `-latest`
 # moves, so re-check it after each CLI upgrade.
 #
-# gpt-6.1-sol, the default, has no entry and cannot get one: its catalog entry
+# gpt-6.1-sol has no entry and cannot get one under exec: its catalog entry
 # lists only the `standard` cyber program, because Daybreak on 6.1 Sol (and on
 # 6 Astra) needs Daybreak Red approval. gpt-6-sol is OpenAI's mainline Daybreak
 # Blue model, but only through `access_programs.cyber`, which exec cannot set.

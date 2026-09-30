@@ -118,14 +118,13 @@ before assuming.
   `turn/start.cyberAccessProgram` (its `[desktop.daybreak-enabled]` toggle).
   `exec` has no flag or config key for it, and `-c cyber_access_program=...` is
   silently ignored (the rollout's `turn_context` records
-  `cyber_access_program: null`; checked live on 0.159.2). Under `exec`, only the
+  `cyber_access_program: null`). Under `exec`, only the
   `gpt-daybreak-blue-latest` slug gets Daybreak, and it is `gpt-5.6-sol`
-  (developers.openai.com model page). Per OpenAI's Daybreak guide, `gpt-6-sol`
-  is the mainline Daybreak Blue model, while `gpt-6.1-sol` and `gpt-6-astra`
-  need Daybreak Red approval; their catalog entries list only `standard`. The
-  catalog does not say which base the Daybreak slug uses and `-latest` moves,
-  so re-check `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red
-  automatically: it is a separate, offensive-security approval.
+  (developers.openai.com model page). Why no GPT-6 model gets a Daybreak swap
+  is recorded above `DAYBREAK_VARIANTS` in `models.py`. The catalog does not
+  say which base the Daybreak slug uses and `-latest` moves, so re-check
+  `DAYBREAK_VARIANTS` on upgrade. Never route Daybreak Red automatically: it
+  is a separate, offensive-security approval.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.

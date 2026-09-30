@@ -86,7 +86,7 @@ Things that will bite you if you don't know them — all enforced by the server:
   neither `max` nor `ultra`. An invalid pair is rejected up front rather than
   failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **6.1 Sol, 5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
+- **5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
   you'd think.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.

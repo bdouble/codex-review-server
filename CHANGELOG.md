@@ -25,6 +25,10 @@ Support for **GPT-6.1 Sol**, now the default, verified against **codex-cli
   `gpt-6-sol` remains reachable by full slug. The delegation skill routes
   ordinary engineering, review, and hard problems to 6.1 Sol.
 - Fallback catalog descriptions match the 0.159.2 catalog.
+- `/codex:review` now lists the `astra` alias, which it already shared with
+  `/codex:delegate`.
+- A rejected-model error also suggests `codex update`, since an older CLI may
+  not know a newer model.
 
 ### Unchanged: Daybreak
 

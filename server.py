@@ -141,9 +141,8 @@ def _prefer_daybreak(model: str) -> str:
     """Swap in the model's Daybreak build when the account has one.
 
     Same base model, run under the security-aware Daybreak program, so this is
-    a substitution rather than a routing decision: the GPT-6 models, including
-    the gpt-6.1-sol default, have no Daybreak build reachable through
-    `codex exec` and stay as they are.
+    a substitution rather than a routing decision: a model with no entry in
+    models.DAYBREAK_VARIANTS, which today is every GPT-6 model, stays as it is.
     CODEX_PREFER_DAYBREAK=false turns it off.
     """
     if Config.PREFER_DAYBREAK:
