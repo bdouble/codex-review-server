@@ -280,7 +280,8 @@ def _install_signal_handlers() -> None:
     init, and keep editing files and burning quota with nobody reading it.
 
     Raising instead lets the runner's cleanup (codex_runner.supervise)
-    terminate codex on the way out. The job is left mid-flight, which reconciliation then settles.
+    terminate codex on the way out. The job is left mid-flight, which
+    reconciliation then settles.
 
     (codex_cancel signals the whole process group, so codex already gets its
     own SIGTERM there. This covers a plain `kill <worker_pid>`, which reaches

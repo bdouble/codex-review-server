@@ -38,8 +38,13 @@ for line in sys.stdin:
     log.write(line)
     log.flush()
     method, rid = message.get("method"), message.get("id")
+    if rid == 99 and method is None:
+        # Our reply to the approval request below; the turn waits on it.
+        if "error" in message:
+            finish()
+        continue
     if rid is None:
-        continue  # a notification (initialized) or our own declined request
+        continue  # a notification (initialized)
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": rid, "result": {}})
     elif method in ("thread/start", "thread/resume"):
@@ -59,12 +64,15 @@ for line in sys.stdin:
             continue
         send({"jsonrpc": "2.0", "id": rid, "result": {"turn": {"id": TURN}}})
         if mode == "hang":
+            notify("item/completed", {"threadId": THREAD, "item": {
+                "type": "agentMessage", "text": "Reading the code first."}})
             time.sleep(60)
         if mode == "exit_mid_turn":
             sys.exit(3)
         if mode == "server_request":
             send({"jsonrpc": "2.0", "id": 99, "method": "item/commandExecution/requestApproval",
                   "params": {"threadId": THREAD}})
+            continue
         if mode == "daybreak_refused":
             detail = ("unexpected status 403 Forbidden: {\"detail\":\"Daybreak isn't "
                       "available for this model. Turn off Daybreak or choose another model.\"}")
@@ -87,6 +95,8 @@ for line in sys.stdin:
         notify("item/completed", {"threadId": THREAD, "item": {
             "type": "agentMessage", "text": '{"answer": "OK"}'}})
         finish()
+        if mode == "slow_exit":
+            time.sleep(60)  # ignores stdin EOF, as a slow shutdown would
 '''
 
 
@@ -212,7 +222,10 @@ class TestFailures:
             fake("rpc_error")
 
     def test_server_requests_are_declined_not_left_hanging(self, fake):
-        result, _ = fake("server_request")
+        # The fake finishes the turn only once it has our reply; an unanswered
+        # request would run to the timeout.
+        result, _ = fake("server_request", timeout=10)
+        assert result["timed_out"] is False
         assert result["exit_code"] == 0
 
     def test_exit_mid_turn_is_a_failure(self, fake):
@@ -224,3 +237,16 @@ class TestFailures:
         result, _ = fake("hang", timeout=2)
         assert result["timed_out"] is True
         assert time.monotonic() - started < 20
+
+    def test_interim_commentary_is_not_reported_as_output(self, fake):
+        # exec's -o holds only a finished turn's answer; a cut-off turn's last
+        # message is progress narration, not a result.
+        result, _ = fake("hang", timeout=2)
+        assert "Reading the code first." not in result["output"]
+        assert "timed out" in result["output"]
+
+    def test_a_slow_shutdown_after_the_turn_is_not_a_timeout(self, fake):
+        # The deadline passing while app-server shuts down cuts nothing short.
+        result, _ = fake("slow_exit", timeout=2)
+        assert result["timed_out"] is False
+        assert result["output"] == '{"answer": "OK"}'

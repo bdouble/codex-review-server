@@ -54,8 +54,9 @@ security work to `gpt-6-sol`, as the table says, and leave other work on
 Red approval on them.
 
 The launch response's `cyber_access_program` says whether Daybreak applied.
-`null` on a `gpt-6-sol` job means the account isn't approved, and the job runs
-with standard safeguards; tell the user rather than implying otherwise. A
+`null` on a `gpt-6-sol` job means it runs with standard safeguards: the
+account isn't approved, the live catalog couldn't be read, or
+`CODEX_PREFER_DAYBREAK=false`. Tell the user rather than implying otherwise. A
 finished Daybreak job's `verification` includes a `cyber_access_program`
 check, read from codex's own record of the turn.
 
@@ -64,11 +65,12 @@ Constraints that are enforced, not advisory:
 - **Effort validity is per-model.** The Luna models have no `ultra`. `gpt-5.5`
   tops out at `xhigh` — no `max`, no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
-- **5.6 Sol and Daybreak are strong at low effort.** Start lower than
-  instinct suggests; their own default is `low`.
+- **5.6 Sol and `gpt-daybreak-blue-latest` are strong at low effort.** Start
+  lower than instinct suggests; their own default is `low`.
 - **Daybreak Blue is access-gated.** It exists only on approved accounts. In
   `codex_models`, `gpt-6-sol`'s `cyber_access_programs` lists `daybreak_blue`
-  where the account has it.
+  where the account has it. Where it doesn't, route security work to
+  `gpt-6.1-sol` instead: `gpt-6-sol` without Daybreak is just the older model.
 - **Always use the full slug.** Bare `gpt-5.6` fails under ChatGPT auth, and
   the Daybreak slug really does end in `-latest`.
 

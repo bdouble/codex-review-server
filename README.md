@@ -93,7 +93,7 @@ Things that will bite you if you don't know them — all enforced by the server:
   neither `max` nor `ultra`. An invalid pair is rejected up front rather than
   failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **5.6 Sol and Daybreak default to `low`** and are strong there. Start lower than
+- **5.6 Sol and `gpt-daybreak-blue-latest` default to `low`** and are strong there. Start lower than
   you'd think.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.
@@ -138,6 +138,7 @@ compares the repo against a snapshot taken before the run:
 | `read_only_respected` | read-only job | `fail` if files changed anyway |
 | `verify_command` | you passed one | `fail` on a non-zero exit — the real one, from your own tests |
 | `git_tracking` | not a git repo | `skip` — nothing could be inspected, so `verified` comes back `null` rather than `true` |
+| `cyber_access_program` | Daybreak job (`cyber_access_program` set) | `fail` if codex's rollout shows the turn ran without the program; `skip` if the rollout could not be read |
 
 `verified` has three states, because "clean" and "unchecked" are different
 claims and a boolean cannot tell them apart:

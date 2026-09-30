@@ -608,8 +608,10 @@ def codex_models() -> str:
     "ultra", and gpt-5.5 tops out at "xhigh".
 
     Returns:
-        JSON catalog with each model's description, efforts and default
-        effort, plus known-deprecated slugs.
+        JSON catalog with each model's description, efforts, default effort
+        and cyber_access_programs (daybreak_blue where the account may run
+        that model under Daybreak Blue), plus known-deprecated slugs and the
+        configured default.
     """
     catalog = models.describe(Config.CODEX_HOME)
     default_model, default_program = _prefer_daybreak(Config.MODEL)

@@ -2,7 +2,8 @@
 
 Spawns `codex exec` inside the target repository so Codex has the same
 repo-aware capability as a manual run. Uses ChatGPT subscription auth
-(via `codex login`), not API keys.
+(via `codex login`), not API keys. The supervision, event handling and result
+assembly helpers here are shared with app_server.py, the Daybreak transport.
 
 Two things here are easy to get wrong and are handled explicitly:
 
@@ -162,7 +163,9 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
             "Codex refused Daybreak for this model or account. The server "
             "requests it only when the live catalog offers it, so the "
             "account's access may have changed. Set CODEX_PREFER_DAYBREAK=false "
-            "to run without Daybreak, or check codex_models."
+            "to run without Daybreak, or check codex_models. A follow-up keeps "
+            "its thread's Daybreak setting whatever the preference; pass "
+            "`model` to have it re-resolved."
         )
 
     if "not supported when using codex with a chatgpt account" in lowered:

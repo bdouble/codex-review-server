@@ -269,8 +269,16 @@ def run_codex_app_server(
             except subprocess.TimeoutExpired:
                 pass  # supervise reaps it.
 
+    if run["turn_status"] is not None:
+        # The turn finished before the deadline. A watchdog that fired since
+        # only cut app-server's shutdown short, which exec has no equivalent
+        # of, so it must not turn a finished turn into a timeout.
+        state["timed_out"] = False
+
+    # Like exec's -o, the file holds the turn's final message and nothing else:
+    # a turn cut off mid-way leaves interim commentary as its last message.
     with open(output_file, "w") as handle:
-        handle.write(run["message"])
+        handle.write(run["message"] if run["turn_status"] == "completed" else "")
 
     # app-server exits 0 whether or not the turn worked; the turn's status is
     # the verdict. An exit before the turn finished counts as a failure too.
