@@ -1,4 +1,4 @@
-"""Tests for the worker's choice of transport and its Daybreak verification."""
+"""Tests for how the worker passes a Daybreak program through and verifies it."""
 
 import os
 import sys
@@ -23,19 +23,16 @@ def isolated_state(tmp_path, monkeypatch):
 
 @pytest.fixture
 def runners(monkeypatch):
-    """Record which transport the worker picks, and with what."""
+    """Record what the worker runs codex and verification with."""
     calls = {}
 
-    def fake(name):
-        def run(**kwargs):
-            calls[name] = kwargs
-            return {"thread_id": "t-1", "usage": None, "output": "done",
-                    "structured_output": None, "timed_out": False, "exit_code": 0,
-                    "rollout_path": "/rollout.jsonl"}
-        return run
+    def run(**kwargs):
+        calls["exec"] = kwargs
+        return {"thread_id": "t-1", "usage": None, "output": "done",
+                "structured_output": None, "timed_out": False, "exit_code": 0,
+                "rollout_path": "/rollout.jsonl"}
 
-    monkeypatch.setattr(worker, "run_codex", fake("exec"))
-    monkeypatch.setattr(worker, "run_codex_app_server", fake("app_server"))
+    monkeypatch.setattr(worker, "run_codex", run)
     verified = {}
     monkeypatch.setattr(worker.verify, "verify",
                         lambda **kwargs: verified.update(kwargs) or {"verified": True})
@@ -51,17 +48,16 @@ def _job(tmp_path, **request):
     })["id"]
 
 
-def test_plain_job_runs_on_exec(tmp_path, runners):
+def test_plain_job_requests_no_program(tmp_path, runners):
     worker.run(_job(tmp_path, cyber_access_program=None))
-    assert "exec" in runners and "app_server" not in runners
+    assert runners["exec"]["cyber_access_program"] is None
     assert runners["verify"]["cyber_access_program"] is None
 
 
-def test_daybreak_job_runs_on_app_server_and_is_verified(tmp_path, runners):
+def test_daybreak_job_requests_its_program_and_is_verified(tmp_path, runners):
     job_id = _job(tmp_path, cyber_access_program="daybreak_blue")
     worker.run(job_id)
-    assert "app_server" in runners and "exec" not in runners
-    assert runners["app_server"]["cyber_access_program"] == "daybreak_blue"
+    assert runners["exec"]["cyber_access_program"] == "daybreak_blue"
     # The rollout, not the request, is what verification checks.
     assert runners["verify"]["cyber_access_program"] == "daybreak_blue"
     assert runners["verify"]["rollout_path"] == "/rollout.jsonl"
@@ -69,14 +65,14 @@ def test_daybreak_job_runs_on_app_server_and_is_verified(tmp_path, runners):
 
 
 def test_codex_start_token_is_recorded_at_spawn(tmp_path, monkeypatch, runners):
-    # app-server's argv names no job, so cancel and reaping identify codex by
-    # its start time.
+    # Cancel and reaping identify codex by its start time as well as by the
+    # job id in its argv.
     def run(**kwargs):
         kwargs["on_spawn"](os.getpid())
         return {"thread_id": "t-1", "usage": None, "output": "", "structured_output": None,
                 "timed_out": False, "exit_code": 0, "rollout_path": None}
 
-    monkeypatch.setattr(worker, "run_codex_app_server", run)
+    monkeypatch.setattr(worker, "run_codex", run)
     job_id = _job(tmp_path, cyber_access_program="daybreak_blue")
     worker.run(job_id)
     record = jobs.read_job(job_id, reconcile_state=False)

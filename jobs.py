@@ -223,8 +223,8 @@ def _is_our_codex(pid: int, job_id: str, token: str = "") -> bool:
     codex the user is running themselves:
       - `codex exec` is invoked with `-o <jobs_dir>/<job_id>.out`, so the job
         id appears in its argv
-      - the process start time equals the token recorded at spawn. This is the
-        only one `codex app-server` has, since its argv names no job.
+      - the process start time equals the token recorded at spawn, which
+        does not depend on how codex was invoked
     """
     identity = _process_identity(pid)
     if identity is None:

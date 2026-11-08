@@ -28,7 +28,7 @@ diff is empty, say so and stop rather than launching a run that finds nothing.
   ambiguous comes back as a question).
 
 `--model` takes the same aliases as `/codex:delegate`: `astra` → `gpt-6-astra`,
-`sol` → `gpt-6.1-sol`, `luna` → `gpt-6-luna`, `terra` → `gpt-5.6-terra`,
+`sol` → `gpt-6.1-sol`, `luna` → `gpt-6-luna`, `terra` → `gpt-6.1-terra`,
 `daybreak` → `gpt-6-sol`, which runs under Daybreak Blue where the account has
 it. A full slug also works (e.g. `gpt-daybreak-blue-latest`).
 

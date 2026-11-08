@@ -2,14 +2,13 @@
 
 Spawns `codex exec` inside the target repository so Codex has the same
 repo-aware capability as a manual run. Uses ChatGPT subscription auth
-(via `codex login`), not API keys. The supervision, event handling and result
-assembly helpers here are shared with app_server.py, the Daybreak transport.
+(via `codex login`), not API keys.
 
 Two things here are easy to get wrong and are handled explicitly:
 
 1. `codex exec` and `codex exec resume` do NOT share a flag set. `resume`
    rejects `--sandbox`, `--color`, and `-C/--cd`. Sandbox on a resume must go
-   through `-c sandbox_mode=...` instead. Re-verified against codex-cli 0.154.0.
+   through `-c sandbox_mode=...` instead. Re-verified against codex-cli 0.167.0.
 
 2. The prompt is fed via stdin (with `-` as the positional) rather than
    interpolated into an argv string. Task text routinely contains backticks and
@@ -17,6 +16,7 @@ Two things here are easy to get wrong and are handled explicitly:
    waiting to happen. We never invoke a shell for codex at all.
 """
 
+import glob
 import json
 import os
 import re
@@ -62,6 +62,37 @@ def build_env() -> dict:
     env = subprocess_env()
     env["CODEX_HOME"] = Config.CODEX_HOME
     return env
+
+
+# Keyed by (binary path, mtime), so `codex update` is noticed without a restart.
+_cyber_flag_support: dict = {}
+
+
+def supports_cyber_access_program() -> bool:
+    """Whether this codex CLI can request a cyber program (codex-cli 0.167+).
+
+    An older CLI rejects `--cyber-access-program` with exit 2 before any turn
+    starts, so the server must not pass it there. Read from `codex exec
+    --help`. When the help cannot be read, assume support: codex is then
+    broken either way, and the job's own failure says why.
+    """
+    codex_bin = find_codex_binary()
+    try:
+        key = (codex_bin, os.stat(codex_bin).st_mtime)
+    except OSError:
+        key = (codex_bin, None)
+    if key not in _cyber_flag_support:
+        try:
+            result = subprocess.run(
+                [codex_bin, "exec", "--help"], capture_output=True, text=True,
+                timeout=30, env=build_env(), stdin=subprocess.DEVNULL,
+            )
+            supported = (result.returncode != 0
+                         or "--cyber-access-program" in result.stdout)
+        except (subprocess.TimeoutExpired, OSError):
+            supported = True
+        _cyber_flag_support[key] = supported
+    return _cyber_flag_support[key]
 
 
 def _reset_hint(text: str) -> str:
@@ -152,9 +183,21 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
             "Fix: run `codex login` to re-authenticate with your ChatGPT account."
         )
 
+    # A CLI older than 0.167 has no --cyber-access-program and rejects the
+    # argv outright (exit 2), before any turn starts. The server checks for
+    # the flag before passing it, so this is reached only if the CLI was
+    # downgraded between launch and run.
+    if "unexpected argument '--cyber-access-program'" in lowered:
+        return CodexError, (
+            "This codex CLI cannot request Daybreak: --cyber-access-program "
+            "needs codex-cli 0.167 or newer. Run `codex update`; until then, "
+            "new jobs and follow-ups run without Daybreak."
+        )
+
     # The backend's two refusals of a requested cyber program (codex-cli
-    # 0.159.2): the account is not approved for it, or the model needs a
-    # higher tier (Daybreak on gpt-6.1-sol and gpt-6-astra needs Daybreak Red).
+    # 0.159.2, unchanged in 0.167.0): the account is not approved for it, or
+    # the model needs a higher tier (Daybreak Red; its catalog entry then
+    # lists only `standard`).
     if (
         "cyber access program is not authorized" in lowered
         or re.search(r"daybreak isn.t available for this model", lowered)
@@ -228,6 +271,7 @@ def build_command(
     output_file: str,
     schema_file: str | None = None,
     resume_thread_id: str | None = None,
+    cyber_access_program: str | None = None,
 ) -> list[str]:
     """Build the codex argv.
 
@@ -252,6 +296,11 @@ def build_command(
 
     if schema_file:
         cmd += ["--output-schema", schema_file]
+
+    # Per turn, on resume too: a resumed turn without it runs as `standard`
+    # even when the thread's earlier turns ran under Daybreak.
+    if cyber_access_program:
+        cmd += ["--cyber-access-program", cyber_access_program]
 
     # Read the prompt from stdin rather than argv.
     cmd.append("-")
@@ -291,17 +340,13 @@ def _phase_for_item(item: dict, current: str) -> str:
 
 
 def new_run_state() -> dict:
-    """What a run learns from codex's event stream, shared by both transports."""
+    """What a run learns from codex's event stream."""
     return {"thread_id": None, "usage": None, "phase": "starting", "timed_out": False,
             "turn_error": None, "stream_error": None}
 
 
 def apply_event(event: dict, state: dict) -> None:
-    """Fold one `codex exec --json` event into the run state.
-
-    The app-server transport translates its notifications into these same
-    events, so this is the only place either transport interprets them.
-    """
+    """Fold one `codex exec --json` event into the run state."""
     event_type = event.get("type")
     if event_type == "thread.started":
         state["thread_id"] = event.get("thread_id")
@@ -441,13 +486,18 @@ def run_codex(
     timeout: int,
     schema_file: str | None = None,
     resume_thread_id: str | None = None,
+    cyber_access_program: str | None = None,
     on_event=None,
     on_spawn=None,
 ) -> dict:
     """Run codex, streaming its JSONL events.
 
-    Returns {thread_id, usage, output, structured_output, timed_out, exit_code}.
-    Raises the typed Codex errors on a recognized failure.
+    Returns {thread_id, usage, output, structured_output, timed_out, exit_code,
+    rollout_path}. Raises the typed Codex errors on a recognized failure.
+
+    rollout_path is the thread's on-disk record, located only when a cyber
+    program was requested, so the caller can confirm from codex's own log that
+    it was sent. Otherwise None.
 
     on_spawn(pid) is called as soon as codex starts, so the caller can record
     the pid and reap it later if this process dies without cleaning up.
@@ -459,12 +509,16 @@ def run_codex(
         output_file=output_file,
         schema_file=schema_file,
         resume_thread_id=resume_thread_id,
+        cyber_access_program=cyber_access_program,
     )
 
     with open(prompt_file, "w") as handle:
         handle.write(prompt)
 
     state = new_run_state()
+    # Built once: the rollout is looked up in the home codex ran under, not in
+    # whatever CODEX_HOME_DIR says by the time it finishes.
+    env = build_env()
 
     # stderr goes to a file rather than a second pipe: draining only stdout
     # while stderr fills its pipe buffer would deadlock on a chatty run.
@@ -472,7 +526,7 @@ def run_codex(
         proc = subprocess.Popen(
             cmd,
             cwd=project_dir,
-            env=build_env(),
+            env=env,
             stdin=stdin_handle,
             stdout=subprocess.PIPE,
             stderr=err_handle,
@@ -499,8 +553,30 @@ def run_codex(
                     on_event(event, state)
             proc.wait()
 
-    return finish_run(state, proc.returncode, output_file, stderr_file,
-                      schema_file, timeout)
+    result = finish_run(state, proc.returncode, output_file, stderr_file,
+                        schema_file, timeout)
+    result["rollout_path"] = (
+        find_rollout(state["thread_id"], env["CODEX_HOME"])
+        if cyber_access_program else None
+    )
+    return result
+
+
+def find_rollout(thread_id: str | None, codex_home: str) -> str | None:
+    """The rollout file codex wrote for a thread, or None if there is none.
+
+    exec reports only the thread id. Codex names each rollout
+    `sessions/YYYY/MM/DD/rollout-<timestamp>-<thread_id>.jsonl` under
+    CODEX_HOME, and a resumed thread appends to the file it started in.
+    """
+    if not thread_id:
+        return None
+    pattern = os.path.join(
+        codex_home, "sessions", "*", "*", "*",
+        f"rollout-*-{glob.escape(thread_id)}.jsonl",
+    )
+    matches = sorted(glob.glob(pattern))
+    return matches[-1] if matches else None
 
 
 def _parse_structured(output: str, schema_file: str | None) -> dict | None:
