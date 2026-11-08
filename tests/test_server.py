@@ -50,6 +50,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(models, "_query_catalog", lambda codex_home=None: None)
     monkeypatch.setattr(server_module, "_spawn_worker", lambda job_id: None)
     monkeypatch.setattr(server_module, "find_codex_binary", lambda: "/usr/bin/codex")
+    # Never probe the developer's real codex CLI; tests that need an old one
+    # say so.
+    monkeypatch.setattr(server_module, "supports_cyber_access_program", lambda: True)
     # Tests simulate a live worker with their own pid; let the identity check
     # accept it (see tests/test_jobs.py for the same shim).
     monkeypatch.setattr(
@@ -604,6 +607,67 @@ class TestDaybreakProgram:
         )
         assert result["model"] == "gpt-6.1-sol"
         assert result["cyber_access_program"] is None
+
+    def test_old_cli_runs_without_daybreak_and_says_so(
+        self, project, daybreak_account, monkeypatch
+    ):
+        # A pre-0.167 CLI rejects --cyber-access-program outright, which would
+        # fail jobs that run fine without it.
+        monkeypatch.setattr(server_module, "supports_cyber_access_program",
+                            lambda: False)
+        result = _call(
+            codex_delegate, task="do x", project_dir=project, model="gpt-6-sol"
+        )
+        assert result["status"] == "started"
+        assert result["cyber_access_program"] is None
+        assert "codex update" in result["warning"]
+        request = jobs.read_job(result["job_id"])["request"]
+        assert request["cyber_access_program"] is None
+        assert request["wanted_cyber_access_program"] == "daybreak_blue"
+
+    def test_no_warning_when_daybreak_applies(self, project, daybreak_account):
+        result = _call(
+            codex_delegate, task="do x", project_dir=project, model="gpt-6-sol"
+        )
+        assert "warning" not in result
+
+    def test_daybreak_returns_to_a_thread_after_codex_update(
+        self, project, daybreak_account, monkeypatch
+    ):
+        # Old CLI: the first follow-up of a Daybreak thread runs without it...
+        job_id = self._finished_job(project, "gpt-6-sol")
+        monkeypatch.setattr(server_module, "supports_cyber_access_program",
+                            lambda: False)
+        degraded = _call(codex_follow_up, job_id=job_id, task="more")
+        assert degraded["cyber_access_program"] is None
+        jobs.update_job(degraded["job_id"], status="completed", thread_id="t-1",
+                        worker_pid=None)
+        # ...and the next one, after `codex update`, gets it back.
+        monkeypatch.setattr(server_module, "supports_cyber_access_program",
+                            lambda: True)
+        restored = _call(codex_follow_up, job_id=degraded["job_id"], task="more")
+        assert restored["cyber_access_program"] == "daybreak_blue"
+
+    def test_follow_up_of_a_pre_260_record_inherits_its_program(
+        self, project, daybreak_account
+    ):
+        job_id = self._finished_job(project, "gpt-6-sol")
+        record = jobs.read_job(job_id)
+        request = {k: v for k, v in record["request"].items()
+                   if k != "wanted_cyber_access_program"}
+        jobs.update_job(job_id, request=request)
+        result = _call(codex_follow_up, job_id=job_id, task="more")
+        assert result["cyber_access_program"] == "daybreak_blue"
+
+    def test_models_tool_warns_on_an_old_cli(
+        self, daybreak_account, monkeypatch
+    ):
+        monkeypatch.setenv("CODEX_MODEL", "gpt-6-sol")
+        monkeypatch.setattr(server_module, "supports_cyber_access_program",
+                            lambda: False)
+        default = _call(codex_models)["configured_default"]
+        assert default["cyber_access_program"] is None
+        assert "codex update" in default["warning"]
 
     def test_follow_up_resolves_an_explicit_models_program(
         self, project, daybreak_account

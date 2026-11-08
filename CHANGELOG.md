@@ -10,15 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Daybreak over `codex exec`.** codex-cli 0.167.0 adds
 `--cyber-access-program` to `exec` and `exec resume`, so the experimental
 app-server transport is gone and every job runs on `exec`. Verified against
-**codex-cli 0.167.0**, which the server now requires.
+**codex-cli 0.167.0**, which Daybreak now requires.
 
 ### Added
 
 - **GPT-6.1 Terra (`gpt-6.1-terra`)**, every effort up to `ultra`, catalog
   default `low`. The `terra` alias in `/codex:delegate` and `/codex:review`
   now means it.
-- An old CLI that rejects `--cyber-access-program` is classified with a
-  pointer to `codex update` instead of surfacing a raw argv error.
+- **Older CLIs run without Daybreak instead of failing.** The server checks
+  once per binary whether `codex exec --help` lists `--cyber-access-program`.
+  If it doesn't, jobs run without the program, and the launch response and
+  `codex_models` carry a `warning` to run `codex update`. The job records
+  `wanted_cyber_access_program`, so a Daybreak thread's follow-ups regain it
+  after the update. If the flag is rejected anyway, the error is classified
+  with the same advice.
 
 ### Changed
 
@@ -30,7 +35,8 @@ app-server transport is gone and every job runs on `exec`. Verified against
 - Daybreak jobs pass `--cyber-access-program daybreak_blue` on every turn,
   follow-ups included: a resumed turn without it runs as `standard`.
   Verification still reads the program from the thread's rollout, now found by
-  thread id under `CODEX_HOME/sessions`.
+  thread id under the `sessions` directory of the home codex ran in, even if
+  `CODEX_HOME_DIR` changes mid-job. A pass proves the program was requested.
 
 ### Removed
 

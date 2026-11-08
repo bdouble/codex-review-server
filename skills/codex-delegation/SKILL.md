@@ -49,14 +49,15 @@ Don't ask the user — choose, then say what you chose and why.
 model the live catalog offers it for under the Daybreak Blue cyber program:
 `gpt-6-sol`, the Luna models and the GPT-5.6 models. Route security work to
 `gpt-6-sol`, as the table says, and leave other work on `gpt-6.1-sol`:
-Daybreak only changes how the model handles security work. `gpt-6.1-sol`,
-`gpt-6.1-terra` and `gpt-6-astra` get no Daybreak here, because it needs
-Daybreak Red approval on them.
+Daybreak only changes how the model handles security work. A model whose
+`cyber_access_programs` in `codex_models` lists only `standard` gets no
+Daybreak here: on it, Daybreak needs Daybreak Red approval.
 
-The launch response's `cyber_access_program` says whether Daybreak applied.
-`null` on a `gpt-6-sol` job means it runs with standard safeguards: the
-account isn't approved, the live catalog couldn't be read, or
-`CODEX_PREFER_DAYBREAK=false`. Tell the user rather than implying otherwise. A
+The launch response's `cyber_access_program` says whether Daybreak was
+requested. `null` on a `gpt-6-sol` job means it runs with standard
+safeguards: the account isn't approved, the live catalog couldn't be read,
+`CODEX_PREFER_DAYBREAK=false`, or the codex CLI is older than 0.167 (the
+response then carries a `warning`). Tell the user rather than implying otherwise. A
 finished Daybreak job's `verification` includes a `cyber_access_program`
 check, read from codex's own record of the turn.
 

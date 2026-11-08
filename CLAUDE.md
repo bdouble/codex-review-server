@@ -109,13 +109,18 @@ before assuming.
   `-c sandbox_mode="..."`.
 - **`-c` values are parsed as TOML**, so strings need quotes:
   `-c model_reasoning_effort='"xhigh"'`.
-- **The server needs codex-cli ≥ 0.167** for `--cyber-access-program`; an
-  older CLI rejects every Daybreak job's argv. GPT-6.1 Sol needs ≥ 0.159, and
-  GPT-6 Sol and Luna ≥ 0.156: older CLIs don't list them.
+- **Daybreak needs codex-cli ≥ 0.167** for `--cyber-access-program`. An
+  older CLI rejects the argv with exit 2, so the server probes
+  `codex exec --help` once per binary (`supports_cyber_access_program`) and
+  runs jobs without Daybreak there, with a launch `warning`. The request keeps
+  `wanted_cyber_access_program`, so follow-ups regain Daybreak after
+  `codex update`. GPT-6.1 Sol needs ≥ 0.159, and GPT-6 Sol and Luna ≥ 0.156:
+  older CLIs don't list them.
 - **Effort support is per-model.** Luna (5.6 and 6) has no `ultra`. Codex
   does not enforce this itself (6 Luna at `ultra` exits 0), so our up-front
-  check is the only guard. `codex debug models` is the authority, and it is per-account: the access-gated
-  `gpt-daybreak-blue-latest` appears only where it has been approved.
+  check is the only guard. `codex debug models` is the authority, and it is
+  per-account: the access-gated `gpt-daybreak-blue-latest` appears only where
+  it has been approved.
 - **Daybreak is an access program, requested per turn.** The catalog's
   `available_access_programs.cyber` lists the programs each model allows on
   this account. `exec` and `exec resume` both take
@@ -128,13 +133,13 @@ before assuming.
 - **The rollout records the request, not the grant.** Nothing in `--json`
   echoes the program; the rollout's `turn_context.cyber_access_program` is the
   only record, so verification reads it (exec gives only the thread id, so the
-  file is found by `sessions/*/*/*/rollout-*-<thread_id>.jsonl`). A refused
-  program is a 403, retried, then a failed turn with exit 1, never a quiet
-  downgrade. The catalog predicts refusals on the primary home (6.1 Sol: 403).
-  It is not exact, though: on 0.167.0 the alternate home's catalog lists only
-  `standard` for `gpt-6-sol`, yet a Daybreak request there succeeded. After a
-  CLI upgrade, run a real Daybreak job and confirm its `cyber_access_program`
-  check passes.
+  file is found by `sessions/*/*/*/rollout-*-<thread_id>.jsonl` under the
+  home codex ran in). A pass therefore proves the request, not the grant.
+  Every refusal seen so far has been a 403, retried, then a failed turn with
+  exit 1. The catalog is not an exact predictor either: on 0.167.0 the
+  alternate home's catalog lists only `standard` for `gpt-6-sol`, yet a
+  Daybreak request there succeeded. After a CLI upgrade, run a real Daybreak
+  job and confirm its `cyber_access_program` check passes.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.

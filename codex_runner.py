@@ -64,6 +64,37 @@ def build_env() -> dict:
     return env
 
 
+# Keyed by (binary path, mtime), so `codex update` is noticed without a restart.
+_cyber_flag_support: dict = {}
+
+
+def supports_cyber_access_program() -> bool:
+    """Whether this codex CLI can request a cyber program (codex-cli 0.167+).
+
+    An older CLI rejects `--cyber-access-program` with exit 2 before any turn
+    starts, so the server must not pass it there. Read from `codex exec
+    --help`. When the help cannot be read, assume support: codex is then
+    broken either way, and the job's own failure says why.
+    """
+    codex_bin = find_codex_binary()
+    try:
+        key = (codex_bin, os.stat(codex_bin).st_mtime)
+    except OSError:
+        key = (codex_bin, None)
+    if key not in _cyber_flag_support:
+        try:
+            result = subprocess.run(
+                [codex_bin, "exec", "--help"], capture_output=True, text=True,
+                timeout=30, env=build_env(), stdin=subprocess.DEVNULL,
+            )
+            supported = (result.returncode != 0
+                         or "--cyber-access-program" in result.stdout)
+        except (subprocess.TimeoutExpired, OSError):
+            supported = True
+        _cyber_flag_support[key] = supported
+    return _cyber_flag_support[key]
+
+
 def _reset_hint(text: str) -> str:
     """Extract when the quota resets, from either wording codex uses.
 
@@ -153,17 +184,20 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
         )
 
     # A CLI older than 0.167 has no --cyber-access-program and rejects the
-    # argv outright (exit 2), before any turn starts.
+    # argv outright (exit 2), before any turn starts. The server checks for
+    # the flag before passing it, so this is reached only if the CLI was
+    # downgraded between launch and run.
     if "unexpected argument '--cyber-access-program'" in lowered:
         return CodexError, (
             "This codex CLI cannot request Daybreak: --cyber-access-program "
-            "needs codex-cli 0.167 or newer. Run `codex update`, or set "
-            "CODEX_PREFER_DAYBREAK=false to run without Daybreak."
+            "needs codex-cli 0.167 or newer. Run `codex update`; until then, "
+            "new jobs and follow-ups run without Daybreak."
         )
 
     # The backend's two refusals of a requested cyber program (codex-cli
     # 0.159.2, unchanged in 0.167.0): the account is not approved for it, or
-    # the model needs a higher tier (Daybreak on gpt-6.1-sol and gpt-6-astra needs Daybreak Red).
+    # the model needs a higher tier (Daybreak Red; its catalog entry then
+    # lists only `standard`).
     if (
         "cyber access program is not authorized" in lowered
         or re.search(r"daybreak isn.t available for this model", lowered)
@@ -482,6 +516,9 @@ def run_codex(
         handle.write(prompt)
 
     state = new_run_state()
+    # Built once: the rollout is looked up in the home codex ran under, not in
+    # whatever CODEX_HOME_DIR says by the time it finishes.
+    env = build_env()
 
     # stderr goes to a file rather than a second pipe: draining only stdout
     # while stderr fills its pipe buffer would deadlock on a chatty run.
@@ -489,7 +526,7 @@ def run_codex(
         proc = subprocess.Popen(
             cmd,
             cwd=project_dir,
-            env=build_env(),
+            env=env,
             stdin=stdin_handle,
             stdout=subprocess.PIPE,
             stderr=err_handle,
@@ -519,12 +556,13 @@ def run_codex(
     result = finish_run(state, proc.returncode, output_file, stderr_file,
                         schema_file, timeout)
     result["rollout_path"] = (
-        find_rollout(state["thread_id"]) if cyber_access_program else None
+        find_rollout(state["thread_id"], env["CODEX_HOME"])
+        if cyber_access_program else None
     )
     return result
 
 
-def find_rollout(thread_id: str | None) -> str | None:
+def find_rollout(thread_id: str | None, codex_home: str) -> str | None:
     """The rollout file codex wrote for a thread, or None if there is none.
 
     exec reports only the thread id. Codex names each rollout
@@ -534,7 +572,7 @@ def find_rollout(thread_id: str | None) -> str | None:
     if not thread_id:
         return None
     pattern = os.path.join(
-        Config.CODEX_HOME, "sessions", "*", "*", "*",
+        codex_home, "sessions", "*", "*", "*",
         f"rollout-*-{glob.escape(thread_id)}.jsonl",
     )
     matches = sorted(glob.glob(pattern))

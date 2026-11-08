@@ -105,9 +105,9 @@ ALIAS_HINTS = {
 # Daybreak Blue is an access program, requested per turn with
 # `codex exec --cyber-access-program` (codex-cli 0.167+). The account's live
 # catalog lists, per model, the programs it may request. A model runs as itself
-# with the program applied; it is never swapped for another slug.
-# gpt-6.1-sol, gpt-6.1-terra and gpt-6-astra list only `standard`: Daybreak on
-# them needs Daybreak Red approval, and requesting Blue anyway is a 403.
+# with the program applied; it is never swapped for another slug. A model
+# whose entry lists only `standard` needs Daybreak Red approval for Daybreak,
+# and requesting Blue for it anyway is a 403.
 DAYBREAK_BLUE = "daybreak_blue"
 
 _CACHE_TTL_SECONDS = 300

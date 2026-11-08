@@ -1,5 +1,6 @@
 """Tests for codex command construction, prompts, and error classification."""
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -134,11 +135,13 @@ class TestFindRollout:
         rollout = codex_home / "rollout-2026-11-08T08-15-48-t-abc.jsonl"
         rollout.write_text("{}\n")
         (codex_home / "rollout-2026-11-08T08-16-00-t-other.jsonl").write_text("{}\n")
-        assert codex_runner.find_rollout("t-abc") == str(rollout)
+        home = str(codex_home.parents[3])
+        assert codex_runner.find_rollout("t-abc", home) == str(rollout)
 
     def test_none_when_missing(self, codex_home):
-        assert codex_runner.find_rollout("t-abc") is None
-        assert codex_runner.find_rollout(None) is None
+        home = str(codex_home.parents[3])
+        assert codex_runner.find_rollout("t-abc", home) is None
+        assert codex_runner.find_rollout(None, home) is None
 
     def test_run_codex_reports_it_only_for_a_cyber_program(
         self, codex_home, tmp_path, monkeypatch
@@ -165,6 +168,78 @@ class TestFindRollout:
 
         assert run("daybreak_blue")["rollout_path"] == str(rollout)
         assert run(None)["rollout_path"] is None
+
+    def test_looked_up_in_the_home_codex_ran_under(self, tmp_path, monkeypatch):
+        # CODEX_HOME_DIR is live-reloaded. Switching it while a Daybreak job
+        # runs must not send the lookup to the other account's sessions.
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"CODEX_HOME_DIR={tmp_path / 'home-a'}\n")
+        monkeypatch.setattr(config, "_ENV_FILE", env_file)
+        monkeypatch.setattr(config, "_overridden", {})
+        monkeypatch.delenv("CODEX_HOME_DIR", raising=False)
+        day = tmp_path / "home-a" / "sessions" / "2026" / "11" / "08"
+        day.mkdir(parents=True)
+        rollout = day / "rollout-2026-11-08T08-15-48-t-abc.jsonl"
+        rollout.write_text("{}\n")
+        script = tmp_path / "fake_codex.sh"
+        script.write_text(
+            "#!/bin/bash\n"
+            'echo \'{"type":"thread.started","thread_id":"t-abc"}\'\n'
+            f"echo 'CODEX_HOME_DIR={tmp_path / 'home-b'}' > '{env_file}'\n"
+        )
+        script.chmod(0o755)
+        monkeypatch.setattr(codex_runner, "find_codex_binary", lambda: str(script))
+        result = codex_runner.run_codex(
+            project_dir=str(tmp_path), prompt="x", model="m", effort="low",
+            sandbox="read-only",
+            output_file=str(tmp_path / "o.txt"),
+            prompt_file=str(tmp_path / "p.txt"),
+            stderr_file=str(tmp_path / "e.txt"),
+            timeout=30, cyber_access_program="daybreak_blue",
+        )
+        assert config.Config.CODEX_HOME == str(tmp_path / "home-b")
+        assert result["rollout_path"] == str(rollout)
+
+
+class TestCyberFlagSupport:
+    @pytest.fixture(autouse=True)
+    def fresh_cache(self, monkeypatch):
+        monkeypatch.setattr(codex_runner, "_cyber_flag_support", {})
+
+    def _cli(self, tmp_path, monkeypatch, help_text, exit_code=0):
+        script = tmp_path / "codex"
+        script.write_text(
+            f"#!/bin/bash\necho {help_text!r}\n"
+            f"echo called >> '{tmp_path / 'calls'}'\nexit {exit_code}\n"
+        )
+        script.chmod(0o755)
+        monkeypatch.setattr(codex_runner, "find_codex_binary", lambda: str(script))
+        return script
+
+    def test_a_cli_that_lists_the_flag_supports_it(self, tmp_path, monkeypatch):
+        self._cli(tmp_path, monkeypatch, "--cyber-access-program <PROGRAM>")
+        assert codex_runner.supports_cyber_access_program() is True
+
+    def test_a_pre_0167_cli_does_not(self, tmp_path, monkeypatch):
+        self._cli(tmp_path, monkeypatch, "--output-schema <FILE>")
+        assert codex_runner.supports_cyber_access_program() is False
+
+    def test_unreadable_help_assumes_support(self, tmp_path, monkeypatch):
+        # Codex is broken either way; the job's own failure explains why.
+        self._cli(tmp_path, monkeypatch, "boom", exit_code=1)
+        assert codex_runner.supports_cyber_access_program() is True
+
+    def test_cached_until_the_binary_changes(self, tmp_path, monkeypatch):
+        script = self._cli(tmp_path, monkeypatch, "--output-schema <FILE>")
+        assert codex_runner.supports_cyber_access_program() is False
+        assert codex_runner.supports_cyber_access_program() is False
+        assert (tmp_path / "calls").read_text().count("called") == 1
+        # `codex update` replaces the binary, which changes its mtime.
+        script.write_text(script.read_text().replace(
+            "--output-schema <FILE>", "--cyber-access-program <PROGRAM>"))
+        stat = script.stat()
+        os.utime(script, (stat.st_atime, stat.st_mtime + 10))
+        assert codex_runner.supports_cyber_access_program() is True
 
 
 class TestClassifyFailure:

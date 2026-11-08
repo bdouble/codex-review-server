@@ -79,13 +79,15 @@ turn and fails if the program was not sent.
 `gpt-6.1-sol`, `gpt-6.1-terra` and `gpt-6-astra` get Daybreak only with Daybreak
 Red approval, so their catalog entries list just the standard program, and
 they run without it. Each job reports `cyber_access_program`, so you can see
-whether Daybreak applied. `CODEX_PREFER_DAYBREAK=false` turns all of this off
+whether Daybreak was requested. `CODEX_PREFER_DAYBREAK=false` turns all of this off
 for new jobs; a follow-up keeps its thread's model and Daybreak setting unless
 you pass `model`.
 
-The server needs **codex-cli 0.167 or newer**, the first with
-`--cyber-access-program`; on an older CLI every Daybreak job fails at once,
-with a pointer to `codex update`.
+Daybreak needs **codex-cli 0.167 or newer**, the first with
+`--cyber-access-program`. On an older CLI the server runs jobs without
+Daybreak, and the launch response's `warning` says to run `codex update`.
+A thread that ran without it gets it back on its next follow-up after the
+update.
 
 Things that will bite you if you don't know them — all enforced by the server:
 

@@ -27,7 +27,11 @@ from mcp.server.fastmcp import FastMCP
 import jobs
 import models
 import verify
-from codex_runner import CodexNotFoundError, find_codex_binary
+from codex_runner import (
+    CodexNotFoundError,
+    find_codex_binary,
+    supports_cyber_access_program,
+)
 from config import Config
 
 server = FastMCP("codex-review-server")
@@ -149,23 +153,44 @@ def _daybreak_program(model: str) -> str | None:
     return models.daybreak_program(model, Config.CODEX_HOME)
 
 
+_OLD_CLI_WARNING = (
+    "Running without Daybreak: this codex CLI is older than 0.167 and cannot "
+    "request a cyber program. Run `codex update` to get Daybreak back."
+)
+
+
+def _requestable(program: str | None) -> str | None:
+    """`program`, or None if this codex CLI cannot request it.
+
+    An older CLI rejects the flag outright, so passing it would fail jobs that
+    run fine without Daybreak.
+    """
+    if program and not supports_cyber_access_program():
+        return None
+    return program
+
+
 def _resolve_settings(
     model: str, effort: str, inherited: tuple[str, str | None] | None = None
-) -> tuple[str, str, str | None, str | None]:
+) -> tuple[str, str, str | None, str | None, str | None]:
     """Resolve model, effort and cyber program against config and the catalog.
 
-    Returns (model, effort, cyber_access_program, validation_error).
-    `inherited` is the (model, program) a follow-up's thread already ran on;
-    it is kept as it is, whatever the Daybreak preference is now.
+    Returns (model, effort, cyber_access_program, wanted_program, error).
+    wanted_program is the program the job would run under on a CLI that can
+    request it; it differs from cyber_access_program only when this CLI
+    cannot. `inherited` is the (model, program) a follow-up's thread already
+    ran on, or wanted to; it is kept as it is, whatever the Daybreak
+    preference is now.
     """
     if inherited:
-        chosen_model, program = inherited
+        chosen_model, wanted = inherited
     else:
         chosen_model = model or Config.MODEL
-        program = _daybreak_program(chosen_model)
+        wanted = _daybreak_program(chosen_model)
+    program = _requestable(wanted)
     chosen_effort = effort or Config.EFFORT
     error = models.validate(chosen_model, chosen_effort, Config.CODEX_HOME)
-    return chosen_model, chosen_effort, program, error
+    return chosen_model, chosen_effort, program, wanted, error
 
 
 def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
@@ -205,7 +230,7 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             f"for work in an ordinary directory.",
         )
 
-    chosen_model, chosen_effort, program, error = _resolve_settings(
+    chosen_model, chosen_effort, program, wanted_program, error = _resolve_settings(
         model, effort, inherited
     )
     if error:
@@ -228,6 +253,9 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
         "model": chosen_model,
         "effort": chosen_effort,
         "cyber_access_program": program,
+        # What a follow-up inherits, so a thread that ran without Daybreak only
+        # because the CLI was old gets it back after `codex update`.
+        "wanted_cyber_access_program": wanted_program,
         "sandbox": "workspace-write" if write else "read-only",
         "write": write,
         "timeout": effective_timeout,
@@ -255,7 +283,7 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
 
     _spawn_worker(record["id"])
 
-    return json.dumps({
+    response = {
         "status": "started",
         "job_id": record["id"],
         "kind": kind,
@@ -269,7 +297,10 @@ def _launch(kind: str, project_dir: str, model: str, effort: str, write: bool,
             f"codex_status('{record['id']}', wait=True) to block until it "
             f"finishes. Collect the result with codex_result('{record['id']}')."
         ),
-    }, indent=2)
+    }
+    if wanted_program != program:
+        response["warning"] = _OLD_CLI_WARNING
+    return json.dumps(response, indent=2)
 
 
 def _summarize(record: dict) -> dict:
@@ -433,7 +464,11 @@ def codex_follow_up(
         effort=effort or record.get("effort", ""),
         inherited=None if model else (
             record.get("model", ""),
-            record.get("request", {}).get("cyber_access_program"),
+            # Records from before 2.6.0 have only cyber_access_program.
+            record.get("request", {}).get(
+                "wanted_cyber_access_program",
+                record.get("request", {}).get("cyber_access_program"),
+            ),
         ),
         write=write,
         timeout=timeout,
@@ -608,11 +643,15 @@ def codex_models() -> str:
         configured default.
     """
     catalog = models.describe(Config.CODEX_HOME)
+    wanted = _daybreak_program(Config.MODEL)
+    program = _requestable(wanted)
     catalog["configured_default"] = {
         "model": Config.MODEL,
         "effort": Config.EFFORT,
-        "cyber_access_program": _daybreak_program(Config.MODEL),
+        "cyber_access_program": program,
     }
+    if wanted != program:
+        catalog["configured_default"]["warning"] = _OLD_CLI_WARNING
     return json.dumps(catalog, indent=2)
 
 

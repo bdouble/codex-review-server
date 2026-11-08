@@ -319,10 +319,10 @@ def applied_cyber_program(rollout_path: str | None) -> str | None:
 
     Read from the rollout's `turn_context` entries, the one place codex writes
     down what it actually sent: exec's event stream never echoes a turn's
-    program back. It records the request, not the backend's verdict, but the
-    backend refuses a program it will not grant with a 403 that fails the
-    turn. Raises OSError if the rollout cannot be read, and returns None when
-    no turn recorded a program.
+    program back. It records the request, not the backend's verdict, so a pass
+    means Daybreak was requested. Every refusal seen so far has been a 403 that
+    fails the turn. Raises OSError if the rollout cannot be read, and returns
+    None when no turn recorded a program.
     """
     if not rollout_path:
         raise OSError("codex's rollout for this thread was not found")
@@ -353,7 +353,7 @@ def _cyber_program_check(expected: str, rollout_path: str | None) -> dict:
         return {
             "name": "cyber_access_program",
             "status": "skip",
-            "detail": f"Could not confirm {expected} was applied: {exc}.",
+            "detail": f"Could not confirm {expected} was sent: {exc}.",
         }
     if applied == expected:
         return {
