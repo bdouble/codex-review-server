@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import jobs
 import verify
-from app_server import run_codex_app_server
 from codex_runner import (
     CodexAuthError,
     CodexError,
@@ -137,7 +136,7 @@ def run(job_id: str) -> None:
         job_id,
         f"Started {request.get('kind')} on {request.get('model')} "
         f"(effort={request.get('effort')}, sandbox={request.get('sandbox')}"
-        + (f", {program} via app-server" if program else "") + ")",
+        + (f", {program}" if program else "") + ")",
     )
 
     schema_file = None
@@ -168,22 +167,15 @@ def run(job_id: str) -> None:
     def on_spawn(codex_pid):
         # Recorded immediately so a SIGKILLed worker still leaves enough behind
         # for reconciliation to find and reap this codex process. The start
-        # time is its identity: app-server's argv does not name the job.
+        # time identifies it alongside the job id in its argv.
         jobs.update_job(
             job_id,
             codex_pid=codex_pid,
             codex_token=jobs.process_start_token(codex_pid),
         )
 
-    # Only a cyber program needs app-server; see app_server.py.
-    runner = run_codex
-    runner_args = {}
-    if program:
-        runner = run_codex_app_server
-        runner_args = {"cyber_access_program": program}
-
     try:
-        result = runner(
+        result = run_codex(
             project_dir=project_dir,
             prompt=_build_prompt(request),
             model=request["model"],
@@ -195,9 +187,9 @@ def run(job_id: str) -> None:
             timeout=request["timeout"],
             schema_file=schema_file,
             resume_thread_id=request.get("resume_thread_id"),
+            cyber_access_program=program,
             on_event=on_event,
             on_spawn=on_spawn,
-            **runner_args,
         )
     except CodexError as exc:
         # The sentinel file, not the record field — a concurrent phase write

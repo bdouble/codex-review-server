@@ -5,7 +5,7 @@ implementations for this pattern either trust the model's self-report or
 mandate verification in prose and never enforce it. This module checks the
 claim against the repository: what git says actually changed, and whether the
 project's own test command still passes. For a Daybreak job it also checks,
-from codex's own rollout, that the cyber program was really applied.
+from codex's own rollout, that codex really sent the cyber program.
 
 Every check is grounded in observable state, never in Codex's narration.
 """
@@ -318,12 +318,14 @@ def applied_cyber_program(rollout_path: str | None) -> str | None:
     """The cyber program codex recorded for the thread's latest turn.
 
     Read from the rollout's `turn_context` entries, the one place codex writes
-    down what it actually sent: the app-server protocol never echoes a turn's
-    program back. Raises OSError if the rollout cannot be read, and returns
-    None when no turn recorded a program.
+    down what it actually sent: exec's event stream never echoes a turn's
+    program back. It records the request, not the backend's verdict, but the
+    backend refuses a program it will not grant with a 403 that fails the
+    turn. Raises OSError if the rollout cannot be read, and returns None when
+    no turn recorded a program.
     """
     if not rollout_path:
-        raise OSError("codex did not report the thread's rollout path")
+        raise OSError("codex's rollout for this thread was not found")
     applied = None
     with open(rollout_path) as handle:
         for line in handle:
@@ -339,11 +341,11 @@ def applied_cyber_program(rollout_path: str | None) -> str | None:
 
 
 def _cyber_program_check(expected: str, rollout_path: str | None) -> dict:
-    """Confirm the requested program was applied, rather than trusting it was.
+    """Confirm the requested program was sent, rather than trusting it was.
 
-    The request field is experimental. A CLI that renamed or dropped it could
-    run the turn without Daybreak and still succeed, and nothing else would
-    notice.
+    `--cyber-access-program` is experimental. A CLI that ignored it, as exec
+    once silently ignored `-c cyber_access_program`, would run the turn without
+    Daybreak and still succeed, and nothing else would notice.
     """
     try:
         applied = applied_cyber_program(rollout_path)
@@ -364,8 +366,9 @@ def _cyber_program_check(expected: str, rollout_path: str | None) -> dict:
         "status": "fail",
         "detail": (
             f"Requested {expected}, but codex's rollout records "
-            f"{applied or 'no program'}, so the job ran without it. The "
-            f"app-server protocol may have changed; see CLAUDE.md."
+            f"{applied or 'no program'}, so the job ran without it. "
+            f"`codex exec --cyber-access-program` may have changed; see "
+            f"CLAUDE.md."
         ),
     }
 

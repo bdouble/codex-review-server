@@ -137,22 +137,16 @@ def _conflict_message(conflict: dict, project_dir: str, write: bool) -> str:
     )
 
 
-def _prefer_daybreak(model: str) -> tuple[str, str | None]:
-    """Run the model under Daybreak when the account has it for that model.
+def _daybreak_program(model: str) -> str | None:
+    """The cyber program to run the model under, or None.
 
-    Returns (model, cyber_access_program). Same base model, run under the
-    security-aware Daybreak program, so this is a substitution rather than a
-    routing decision. A model gets it one of two ways (see models.py): swapped
-    for a dedicated Daybreak slug, or kept and run with the program requested
-    per turn. A model with neither stays as it is. CODEX_PREFER_DAYBREAK=false
-    turns it off.
+    Daybreak Blue when the account's live catalog offers it for that model.
+    The model itself never changes; it runs under the security-aware program,
+    so this is not a routing decision. CODEX_PREFER_DAYBREAK=false turns it off.
     """
     if not Config.PREFER_DAYBREAK:
-        return model, None
-    variant = models.daybreak_variant(model, Config.CODEX_HOME)
-    if variant:
-        return variant, None
-    return model, models.daybreak_program(model, Config.CODEX_HOME)
+        return None
+    return models.daybreak_program(model, Config.CODEX_HOME)
 
 
 def _resolve_settings(
@@ -162,12 +156,13 @@ def _resolve_settings(
 
     Returns (model, effort, cyber_access_program, validation_error).
     `inherited` is the (model, program) a follow-up's thread already ran on;
-    it is kept as it is, with no Daybreak swap.
+    it is kept as it is, whatever the Daybreak preference is now.
     """
     if inherited:
         chosen_model, program = inherited
     else:
-        chosen_model, program = _prefer_daybreak(model or Config.MODEL)
+        chosen_model = model or Config.MODEL
+        program = _daybreak_program(chosen_model)
     chosen_effort = effort or Config.EFFORT
     error = models.validate(chosen_model, chosen_effort, Config.CODEX_HOME)
     return chosen_model, chosen_effort, program, error
@@ -334,12 +329,11 @@ def codex_delegate(
             cannot ask clarifying questions mid-run.
         project_dir: Absolute path to the working directory.
         model: Model slug (e.g. "gpt-6.1-sol"). Defaults to CODEX_MODEL. Runs
-            under Daybreak Blue when the account has it for that model:
-            gpt-6-sol runs as itself with the program applied, gpt-5.6-sol
-            as gpt-daybreak-blue-latest. The response's cyber_access_program
-            says which. Call codex_models for the live catalog.
+            under Daybreak Blue when the account's catalog offers it for that
+            model (e.g. gpt-6-sol); the response's cyber_access_program says
+            so. Call codex_models for the live catalog.
         effort: low|medium|high|xhigh|max|ultra. Defaults to CODEX_EFFORT.
-            "ultra" (not on Luna or 5.5) runs several agents in parallel — slow, for
+            "ultra" (not on Luna) runs several agents in parallel — slow, for
             genuinely hard problems.
         write: True to allow file edits (workspace-write). Default read-only.
         context: Background Codex should have — constraints, prior findings,
@@ -605,7 +599,7 @@ def codex_models() -> str:
     server's assumptions — including models released after this server was
     written, and access-gated ones such as gpt-daybreak-blue-latest that exist
     only on approved accounts. Effort support is per-model: the Luna models have no
-    "ultra", and gpt-5.5 tops out at "xhigh".
+    "ultra".
 
     Returns:
         JSON catalog with each model's description, efforts, default effort
@@ -614,11 +608,10 @@ def codex_models() -> str:
         configured default.
     """
     catalog = models.describe(Config.CODEX_HOME)
-    default_model, default_program = _prefer_daybreak(Config.MODEL)
     catalog["configured_default"] = {
-        "model": default_model,
+        "model": Config.MODEL,
         "effort": Config.EFFORT,
-        "cyber_access_program": default_program,
+        "cyber_access_program": _daybreak_program(Config.MODEL),
     }
     return json.dumps(catalog, indent=2)
 

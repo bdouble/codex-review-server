@@ -104,7 +104,6 @@ class TestFallback:
         assert models.FALLBACK_CATALOG["gpt-5.6-sol"]["default_effort"] == "low"
         assert "ultra" in models.FALLBACK_CATALOG["gpt-5.6-terra"]["efforts"]
         assert "ultra" not in models.FALLBACK_CATALOG["gpt-5.6-luna"]["efforts"]
-        assert "max" not in models.FALLBACK_CATALOG["gpt-5.5"]["efforts"]
 
 
 class TestCaching:
@@ -325,7 +324,7 @@ class TestLiveCatalogOutranksStaticTables:
         # Dropped from the live catalog in the 0.154.0 era. Naming a successor
         # beats letting codex answer with a bare 400 twenty minutes in.
         assert "gpt-6-luna" in models.DEPRECATED_MODELS["gpt-5.4-mini"]
-        assert "gpt-5.5" in models.DEPRECATED_MODELS["gpt-5.4"]
+        assert "gpt-6.1-terra" in models.DEPRECATED_MODELS["gpt-5.4"]
 
 
 class TestFallbackCatalogMatches0154:
@@ -454,11 +453,31 @@ class TestCodex0159Catalog:
         assert config.DEFAULT_MODEL == "gpt-6.1-sol"
         assert config.DEFAULT_MODEL in models.FALLBACK_CATALOG
 
-    def test_gpt6_1_sol_has_no_daybreak_build(self):
-        # Guards DAYBREAK_VARIANTS itself, which daybreak_variant consults
-        # before the catalog: Daybreak on 6.1 Sol needs Daybreak Red approval,
-        # so exec has no Daybreak build of it to swap in.
-        assert "gpt-6.1-sol" not in models.DAYBREAK_VARIANTS
+
+# codex-cli 0.167.0, verified live on 2026-11-08: gpt-6.1-terra is new, and
+# gpt-5.5 is gone ("not supported when using Codex with a ChatGPT account").
+SAMPLE_0167 = {"models": [
+    {**_entry("gpt-6.1-terra", _ALL), "default_reasoning_level": "low"},
+    *SAMPLE_0159["models"],
+]}
+
+
+class TestCodex0167Catalog:
+    def test_gpt6_1_terra_is_listed_with_every_effort(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0167))
+        assert models.get_catalog()["gpt-6.1-terra"]["default_effort"] == "low"
+        assert models.validate("gpt-6.1-terra", "ultra") is None
+
+    def test_fallback_carries_gpt6_1_terra(self):
+        entry = models.FALLBACK_CATALOG["gpt-6.1-terra"]
+        assert "ultra" in entry["efforts"]
+        assert entry["default_effort"] == "low"
+
+    def test_gpt5_5_is_deny_listed_now_that_it_is_retired(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0167))
+        assert "gpt-5.5" not in models.FALLBACK_CATALOG
+        error = models.validate("gpt-5.5", "high")
+        assert "deprecated" in error and "gpt-6.1-terra" in error
 
 
 def _with_programs(entry, *programs):
@@ -490,42 +509,20 @@ class TestDaybreakProgram:
         _stub_codex(monkeypatch, json.dumps(payload))
         assert models.daybreak_program("gpt-6-sol") is None
 
-    def test_only_listed_models_use_the_program(self, monkeypatch):
-        # Luna is offered Daybreak too, but running it over the experimental
-        # app-server transport is not worth it; the list keeps that confined.
+    def test_any_model_the_catalog_offers_it_for_gets_it(self, monkeypatch):
+        # exec can request it per turn since codex-cli 0.167, so no model is
+        # held back; the catalog alone decides.
         _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
-        assert models.daybreak_program("gpt-6-luna") is None
+        assert models.daybreak_program("gpt-6-luna") == "daybreak_blue"
+
+    def test_none_where_the_model_needs_daybreak_red(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
         assert models.daybreak_program("gpt-6.1-sol") is None
+
+    def test_none_for_a_model_the_catalog_does_not_list(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
+        assert models.daybreak_program("gpt-9-new") is None
 
     def test_never_taken_from_the_fallback(self, monkeypatch):
         monkeypatch.setattr(models.shutil, "which", lambda _: None)
         assert models.daybreak_program("gpt-6-sol") is None
-
-    def test_program_and_variant_models_do_not_overlap(self):
-        # Each model reaches Daybreak one way; the server tries the slug first.
-        assert not set(models.DAYBREAK_PROGRAM_MODELS) & set(models.DAYBREAK_VARIANTS)
-
-
-class TestDaybreakVariant:
-    def test_found_in_a_live_catalog(self, monkeypatch):
-        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
-        assert models.daybreak_variant("gpt-5.6-sol") == "gpt-daybreak-blue-latest"
-
-    def test_gpt6_sol_has_none_reachable_through_exec(self, monkeypatch):
-        _stub_codex(monkeypatch, json.dumps(SAMPLE_0156))
-        assert models.daybreak_variant("gpt-6-sol") is None
-
-    def test_none_when_the_account_lacks_it(self, monkeypatch):
-        payload = {"models": [_entry("gpt-5.6-sol", _ALL)]}
-        _stub_codex(monkeypatch, json.dumps(payload))
-        assert models.daybreak_variant("gpt-5.6-sol") is None
-
-    def test_never_taken_from_the_fallback(self, monkeypatch):
-        # The fallback lists Daybreak for every account, approved or not.
-        monkeypatch.setattr(models.shutil, "which", lambda _: None)
-        assert models.daybreak_variant("gpt-5.6-sol") is None
-
-    def test_every_variant_is_in_the_fallback_catalog(self):
-        for base, variant in models.DAYBREAK_VARIANTS.items():
-            assert base in models.FALLBACK_CATALOG
-            assert variant in models.FALLBACK_CATALOG

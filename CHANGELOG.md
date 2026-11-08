@@ -5,6 +5,40 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] — 2026-11-08
+
+**Daybreak over `codex exec`.** codex-cli 0.167.0 adds
+`--cyber-access-program` to `exec` and `exec resume`, so the experimental
+app-server transport is gone and every job runs on `exec`. Verified against
+**codex-cli 0.167.0**, which the server now requires.
+
+### Added
+
+- **GPT-6.1 Terra (`gpt-6.1-terra`)**, every effort up to `ultra`, catalog
+  default `low`. The `terra` alias in `/codex:delegate` and `/codex:review`
+  now means it.
+- An old CLI that rejects `--cyber-access-program` is classified with a
+  pointer to `codex update` instead of surfacing a raw argv error.
+
+### Changed
+
+- **Daybreak Blue applies to any model the live catalog offers it for**, not
+  just `gpt-6-sol`. On an approved account that adds the Luna and GPT-5.6
+  models. The model itself is never swapped: `gpt-5.6-sol` now runs as itself
+  under the program instead of as `gpt-daybreak-blue-latest`, which is still
+  reachable by full slug and now also requests the program explicitly.
+- Daybreak jobs pass `--cyber-access-program daybreak_blue` on every turn,
+  follow-ups included: a resumed turn without it runs as `standard`.
+  Verification still reads the program from the thread's rollout, now found by
+  thread id under `CODEX_HOME/sessions`.
+
+### Removed
+
+- `app_server.py` and the `codex app-server` transport.
+- `gpt-5.5`, retired for ChatGPT accounts ("not supported when using Codex
+  with a ChatGPT account"). It is now on the deprecated list, pointing to
+  `gpt-6.1-terra`, as is the `gpt-5.4` hint that used to point to it.
+
 ## [2.5.0] — 2026-09-30
 
 **GPT-6 Sol under Daybreak Blue.** Security work now runs on `gpt-6-sol`

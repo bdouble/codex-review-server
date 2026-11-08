@@ -269,9 +269,9 @@ class TestOrphanReaping:
         assert not jobs.reap_orphan_codex({"id": "task-a-000000", "codex_pid": 5150})
         assert killed == []
 
-    def test_app_server_codex_is_matched_by_its_start_time(self, monkeypatch):
-        # `codex app-server` has no job id in its argv; without the token,
-        # cancelling a Daybreak job would leave codex running.
+    def test_codex_is_matched_by_its_start_time_alone(self, monkeypatch):
+        # A codex whose argv does not name the job is still recognized by the
+        # token recorded at spawn.
         monkeypatch.setattr(
             jobs, "_process_identity",
             lambda pid: ("Wed Jul 15 10:00:00 2026", "/x/codex app-server"),

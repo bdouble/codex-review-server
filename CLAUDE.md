@@ -21,12 +21,9 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`server.py`** — FastMCP server. Registers the nine tools, validates requests,
   spawns workers, formats JSON responses. Runs via stdio transport.
 - **`codex_runner.py`** — Builds codex argv and prompts; runs codex while
-  streaming its `--json` event log. Owns the supervision, event handling and
-  failure classification both transports share. Typed errors (`CodexError`,
-  `CodexRateLimitError`, `CodexNotFoundError`, `CodexAuthError`).
-- **`app_server.py`** — The Daybreak transport: runs one turn over
-  `codex app-server` with a cyber access program, translating its
-  notifications into exec events. Used only for `DAYBREAK_PROGRAM_MODELS`.
+  streaming its `--json` event log. Owns supervision, event handling and
+  failure classification. Typed errors (`CodexError`, `CodexRateLimitError`,
+  `CodexNotFoundError`, `CodexAuthError`).
 - **`models.py`** — Live model catalog from `codex debug models` (5-min cache,
   static fallback) plus per-model effort validation.
 - **`jobs.py`** — On-disk job store: atomic writes, prefix resolution, pruning,
@@ -34,7 +31,7 @@ caller polls. Nine tools: `codex_delegate`, `codex_follow_up`, `codex_status`,
 - **`worker.py`** — Detached per-job worker. Daemonizes, runs codex, verifies,
   records the terminal state.
 - **`verify.py`** — Git-grounded verification, the `verify_command` runner,
-  and the rollout check that a Daybreak job really ran under Daybreak.
+  and the rollout check that codex really sent a Daybreak job's program.
 - **`config.py`** — Live-reloaded config via `classproperty`, plus
   `subprocess_env()`.
 - **`.claude-plugin/`, `commands/`, `skills/`** — plugin packaging. The MCP
@@ -87,14 +84,11 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
   the job id in its argv or by the start-time token recorded at spawn), and
   the worker's SIGTERM handler unwinds into `codex_runner.supervise`'s cleanup,
   so both paths still cover it.
-- **`codex exec`, except where only `codex app-server` will do.** The
-  app-server protocol is experimental and versioned. `exec` is stable and
-  supports `--output-schema` despite the published config reference claiming
-  otherwise. The one exception is a Daybreak Blue job on a model in
-  `DAYBREAK_PROGRAM_MODELS`: only app-server can request a cyber program per
-  turn. `app_server.py` is a thin translator onto codex_runner's shared code,
-  and the worker verifies from the rollout that the program was applied. If
-  `exec` ever gains an access-program flag, delete it.
+- **`codex exec` only, never `codex app-server`.** The app-server protocol is
+  experimental and versioned. `exec` is stable and supports `--output-schema`
+  despite the published config reference claiming otherwise. Daybreak used to
+  need app-server; since 0.167 `exec --cyber-access-program` requests it per
+  turn, and the worker verifies from the rollout that codex sent it.
 - **Prompts go over stdin (`-`), never argv.** Task text routinely contains
   backticks and `$()`. No shell is invoked for codex.
 - **Config is live-reloaded**: `Config` re-reads `.env` on every property access,
@@ -106,7 +100,7 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
 
 ## Codex CLI Gotchas
 
-Re-verified against codex-cli 0.159.2 on 2026-09-30. These contradict parts of
+Re-verified against codex-cli 0.167.0 on 2026-11-08. These contradict parts of
 the published docs — trust the CLI, and re-verify with `codex exec --help`
 before assuming.
 
@@ -115,41 +109,42 @@ before assuming.
   `-c sandbox_mode="..."`.
 - **`-c` values are parsed as TOML**, so strings need quotes:
   `-c model_reasoning_effort='"xhigh"'`.
-- **GPT-6.1 Sol needs codex-cli ≥ 0.159; GPT-6 Sol and Luna need ≥ 0.156.**
-  Older CLIs don't list them, so validation against their catalog can't see
-  them.
-- **Effort support is per-model.** Luna (5.6 and 6) has no `ultra`; 5.5 has
-  neither `max` nor `ultra`. Codex does not enforce this itself (6 Luna at
-  `ultra` exits 0), so our up-front check is the only guard. `codex debug models` is
-  the authority, and it is per-account: the access-gated
+- **The server needs codex-cli ≥ 0.167** for `--cyber-access-program`; an
+  older CLI rejects every Daybreak job's argv. GPT-6.1 Sol needs ≥ 0.159, and
+  GPT-6 Sol and Luna ≥ 0.156: older CLIs don't list them.
+- **Effort support is per-model.** Luna (5.6 and 6) has no `ultra`. Codex
+  does not enforce this itself (6 Luna at `ultra` exits 0), so our up-front
+  check is the only guard. `codex debug models` is the authority, and it is per-account: the access-gated
   `gpt-daybreak-blue-latest` appears only where it has been approved.
-- **Daybreak is an access program, not just a slug.** The catalog's
-  `available_access_programs.cyber` lists `daybreak_blue` on nearly every model.
-  The desktop app applies it per turn via app-server
-  `turn/start.cyberAccessProgram` (its `[desktop.daybreak-enabled]` toggle).
-  `exec` has no flag or config key for it: `-c cyber_access_program=...` and
-  the desktop toggle are both silently ignored (the rollout's `turn_context`
-  records `cyber_access_program: null`). Under `exec`, only the
-  `gpt-daybreak-blue-latest` slug gets Daybreak, and it is `gpt-5.6-sol`
-  (developers.openai.com model page). The catalog does not say which base the
-  Daybreak slug uses and `-latest` moves, so re-check `DAYBREAK_VARIANTS` on
-  upgrade. Never route Daybreak Red automatically: it is a separate,
-  offensive-security approval.
-- **app-server Daybreak needs `experimentalApi`.** Without that `initialize`
-  capability, `turn/start.cyberAccessProgram` does not exist. Its values are
-  camelCase (`daybreakBlue`), unlike the catalog and rollout (`daybreak_blue`).
-  The protocol never echoes the applied program; the rollout's `turn_context`
-  is the only record, which is why verification reads it. A refused program is
-  a 403, retried five times, then a failed turn. It is never a quiet downgrade.
-  The catalog's per-model `available_access_programs.cyber` predicts it
-  exactly. After a CLI upgrade, run a real Daybreak job and confirm its
-  `cyber_access_program` check passes.
+- **Daybreak is an access program, requested per turn.** The catalog's
+  `available_access_programs.cyber` lists the programs each model allows on
+  this account. `exec` and `exec resume` both take
+  `--cyber-access-program daybreak_blue` (marked experimental). It applies to
+  that turn only: a resume without it runs as `standard`. A resume also needs
+  `--model`, or it runs on config.toml's default model rather than the
+  thread's. `-c cyber_access_program=...` is still silently ignored. Never
+  route Daybreak Red automatically: it is a separate, offensive-security
+  approval.
+- **The rollout records the request, not the grant.** Nothing in `--json`
+  echoes the program; the rollout's `turn_context.cyber_access_program` is the
+  only record, so verification reads it (exec gives only the thread id, so the
+  file is found by `sessions/*/*/*/rollout-*-<thread_id>.jsonl`). A refused
+  program is a 403, retried, then a failed turn with exit 1, never a quiet
+  downgrade. The catalog predicts refusals on the primary home (6.1 Sol: 403).
+  It is not exact, though: on 0.167.0 the alternate home's catalog lists only
+  `standard` for `gpt-6-sol`, yet a Daybreak request there succeeded. After a
+  CLI upgrade, run a real Daybreak job and confirm its `cyber_access_program`
+  check passes.
 - **The live catalog outranks `DEPRECATED_MODELS`.** Check it first. A slug the
   account can use must never be blocked by a constant in this repo — that is
   the bug that made `gpt-5.3-codex-spark` unreachable while the CLI listed it.
 - **Bare `gpt-5.6` fails under ChatGPT auth** — full slugs only.
-- **`gpt-5.3-codex` / `gpt-5.2` / `gpt-5.4*` / `gpt-5.3-codex-spark` are
-  gone** and return HTTP 400.
+- **`gpt-5.3-codex` / `gpt-5.2` / `gpt-5.4*` / `gpt-5.3-codex-spark` /
+  `gpt-5.5` are gone**: an HTTP 400, or "not supported when using Codex with a
+  ChatGPT account".
+- **`--json` emits config warnings as `item.completed` items of type
+  `error`** (e.g. "Codex is ignoring N unrecognized configuration settings")
+  on successful runs. They are not failures.
 - **stderr carries noise on successful runs** (other MCP servers in the user's
   codex config log auth errors there). Only classify errors when the exit code
   is non-zero.
@@ -168,7 +163,7 @@ All optional; configured in `.env` (see `.env.example`). The older
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `CODEX_MODEL` | `gpt-6.1-sol` | Validated against the live catalog |
-| `CODEX_PREFER_DAYBREAK` | `true` | Run a model under Daybreak Blue when the live catalog offers it: swapped for its slug (`DAYBREAK_VARIANTS`) or with the program requested per turn (`DAYBREAK_PROGRAM_MODELS`) |
+| `CODEX_PREFER_DAYBREAK` | `true` | Run any model under Daybreak Blue when the account's live catalog offers it for that model |
 | `CODEX_EFFORT` | `high` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
 | `CODEX_TIMEOUT` | `4500` | Seconds; repo-aware work takes 10-20 min, `ultra` longer |
 | `CODEX_FOCUS` | `all` | `bugs`/`security`/`performance`/`all` |

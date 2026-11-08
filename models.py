@@ -6,8 +6,7 @@ server-side by OpenAI and every call using it started failing with a 400.
 Reading the catalog live means new models work without a code change, and
 deprecated ones are caught before we spend 20 minutes on a doomed run.
 
-Effort validity is per-model — the Luna models support `max` but not `ultra`,
-and gpt-5.5 supports neither.
+Effort validity is per-model — the Luna models support `max` but not `ultra`.
 """
 
 import json
@@ -16,7 +15,7 @@ import shutil
 import subprocess
 import time
 
-# Verified against codex-cli 0.159.2 on 2026-09-30 via `codex debug models`.
+# Verified against codex-cli 0.167.0 on 2026-11-08 via `codex debug models`.
 # Only used when the live query fails (codex missing, offline, format change).
 #
 # Entries here are a last-known-good snapshot, never an allow-list: the live
@@ -33,6 +32,12 @@ FALLBACK_CATALOG = {
         "default_effort": "medium",
         "display_name": "GPT-6-Astra",
         "description": "Frontier intelligence for the most demanding work.",
+    },
+    "gpt-6.1-terra": {
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "default_effort": "low",
+        "display_name": "GPT-6.1 Terra",
+        "description": "GPT-6.1 Terra Codex model.",
     },
     "gpt-6-sol": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
@@ -74,12 +79,6 @@ FALLBACK_CATALOG = {
         "display_name": "Daybreak Blue",
         "description": "Latest frontier agentic coding model for broad defensive cybersecurity work.",
     },
-    "gpt-5.5": {
-        "efforts": ["low", "medium", "high", "xhigh"],
-        "default_effort": "medium",
-        "display_name": "GPT-5.5",
-        "description": "Legacy coding model.",
-    },
 }
 
 # Known-dead slugs, so we can fail with a useful message instead of a raw 400.
@@ -91,9 +90,10 @@ FALLBACK_CATALOG = {
 DEPRECATED_MODELS = {
     "gpt-5.3-codex": "Deprecated by OpenAI for ChatGPT-account auth. Use gpt-5.6-terra.",
     "gpt-5.2": "Deprecated by OpenAI for ChatGPT-account auth. Use gpt-5.6-terra.",
-    "gpt-5.4": "Retired from the ChatGPT-account catalog. Use gpt-5.5 or gpt-5.6-terra.",
+    "gpt-5.4": "Retired from the ChatGPT-account catalog. Use gpt-6.1-terra.",
     "gpt-5.4-mini": "Retired from the ChatGPT-account catalog. Use gpt-6-luna.",
     "gpt-5.3-codex-spark": "Retired from the ChatGPT-account catalog. Use gpt-6-luna.",
+    "gpt-5.5": "Retired from the ChatGPT-account catalog. Use gpt-6.1-terra.",
 }
 
 # The bare alias resolves only under API-key auth; this server uses ChatGPT auth.
@@ -102,26 +102,12 @@ ALIAS_HINTS = {
     "gpt-5.6-codex": "gpt-5.6-terra",
 }
 
-# Daybreak Blue is an access program, requested per turn, that covers most of
-# the catalog. There are two ways to get it, and each model uses at most one.
-#
-# DAYBREAK_VARIANTS: a dedicated slug that `codex exec` can run. Per
-# developers.openai.com, gpt-daybreak-blue-latest points at the gpt-5.6-sol
-# snapshot (checked 2026-09-30). The catalog does not say this, and `-latest`
-# moves, so re-check it after each CLI upgrade.
-DAYBREAK_VARIANTS = {
-    "gpt-5.6-sol": "gpt-daybreak-blue-latest",
-}
-
-# DAYBREAK_PROGRAM_MODELS: the model runs as itself, with the program requested
-# on each turn. `exec` has no flag or config key for that, so these jobs go
-# through `codex app-server` (see app_server.py), whose `cyberAccessProgram`
-# field is experimental. The list is deliberately short, to keep that
-# dependency confined to the one model worth it: gpt-6-sol is OpenAI's mainline
-# Daybreak Blue model. gpt-6.1-sol and gpt-6-astra cannot join it — Daybreak on
-# them needs Daybreak Red approval, so their catalog entries list only
-# `standard`, and requesting it anyway is a 403.
-DAYBREAK_PROGRAM_MODELS = ("gpt-6-sol",)
+# Daybreak Blue is an access program, requested per turn with
+# `codex exec --cyber-access-program` (codex-cli 0.167+). The account's live
+# catalog lists, per model, the programs it may request. A model runs as itself
+# with the program applied; it is never swapped for another slug.
+# gpt-6.1-sol, gpt-6.1-terra and gpt-6-astra list only `standard`: Daybreak on
+# them needs Daybreak Red approval, and requesting Blue anyway is a 403.
 DAYBREAK_BLUE = "daybreak_blue"
 
 _CACHE_TTL_SECONDS = 300
@@ -268,33 +254,14 @@ def validate(model: str, effort: str, codex_home: str | None = None) -> str | No
     return None
 
 
-def daybreak_variant(model: str, codex_home: str | None = None) -> str | None:
-    """The Daybreak build of `model` this account can use, or None.
-
-    Only a live catalog can answer this. FALLBACK_CATALOG lists Daybreak for
-    every account, so trusting it would send unapproved accounts to a model
-    codex rejects.
-    """
-    variant = DAYBREAK_VARIANTS.get(model)
-    if variant is None:
-        return None
-    catalog = get_catalog(codex_home)
-    if catalog_source() != "live" or variant not in catalog:
-        return None
-    return variant
-
-
 def daybreak_program(model: str, codex_home: str | None = None) -> str | None:
     """The Daybreak program to request for `model` on this account, or None.
 
-    Eligible when the model is in DAYBREAK_PROGRAM_MODELS and the account's live
-    catalog lists Daybreak Blue for it. The catalog is per-account and per-model,
-    and it matches what the backend enforces: an unapproved account, or a model
-    that needs Daybreak Red, is refused with a 403 rather than quietly run
-    without Daybreak.
+    Eligible when the account's live catalog lists Daybreak Blue for the model.
+    Only a live catalog can answer this: the fallback carries no programs, and
+    the catalog is per-account and per-model. Requesting a program the backend
+    will not grant is refused with a 403, never quietly run without Daybreak.
     """
-    if model not in DAYBREAK_PROGRAM_MODELS:
-        return None
     entry = get_catalog(codex_home).get(model)
     if catalog_source() != "live" or entry is None:
         return None

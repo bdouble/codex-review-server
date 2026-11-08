@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import codex_runner
+import config
 from codex_runner import (
     CodexAuthError,
     CodexError,
@@ -95,6 +96,75 @@ class TestBuildCommand:
         monkeypatch.setattr(codex_runner.shutil, "which", lambda _: None)
         with pytest.raises(CodexNotFoundError, match="chatgpt.com/codex/install.sh"):
             build_command("gpt-5.6-terra", "xhigh", "read-only", "/tmp/o.txt")
+
+    def test_cyber_program_is_requested_on_a_fresh_turn(self):
+        cmd = build_command(
+            "gpt-6-sol", "high", "read-only", "/tmp/o.txt",
+            cyber_access_program="daybreak_blue",
+        )
+        assert cmd[cmd.index("--cyber-access-program") + 1] == "daybreak_blue"
+        assert cmd[-1] == "-"
+
+    def test_cyber_program_is_requested_again_on_resume(self):
+        # Verified live on codex-cli 0.167.0: a resumed turn without the flag
+        # runs as `standard`, whatever the thread's earlier turns ran under.
+        cmd = build_command(
+            "gpt-6-sol", "high", "read-only", "/tmp/o.txt",
+            resume_thread_id="abc-123", cyber_access_program="daybreak_blue",
+        )
+        assert cmd[:4] == ["/usr/bin/codex", "exec", "resume", "abc-123"]
+        assert cmd[cmd.index("--cyber-access-program") + 1] == "daybreak_blue"
+
+    def test_no_cyber_flag_without_a_program(self):
+        cmd = build_command("gpt-6.1-sol", "high", "read-only", "/tmp/o.txt")
+        assert "--cyber-access-program" not in cmd
+
+
+class TestFindRollout:
+    @pytest.fixture
+    def codex_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "_ENV_FILE", tmp_path / "empty.env")
+        monkeypatch.setattr(config, "_overridden", {})
+        monkeypatch.setenv("CODEX_HOME_DIR", str(tmp_path / "home"))
+        day = tmp_path / "home" / "sessions" / "2026" / "11" / "08"
+        day.mkdir(parents=True)
+        return day
+
+    def test_found_by_thread_id(self, codex_home):
+        rollout = codex_home / "rollout-2026-11-08T08-15-48-t-abc.jsonl"
+        rollout.write_text("{}\n")
+        (codex_home / "rollout-2026-11-08T08-16-00-t-other.jsonl").write_text("{}\n")
+        assert codex_runner.find_rollout("t-abc") == str(rollout)
+
+    def test_none_when_missing(self, codex_home):
+        assert codex_runner.find_rollout("t-abc") is None
+        assert codex_runner.find_rollout(None) is None
+
+    def test_run_codex_reports_it_only_for_a_cyber_program(
+        self, codex_home, tmp_path, monkeypatch
+    ):
+        rollout = codex_home / "rollout-2026-11-08T08-15-48-t-abc.jsonl"
+        rollout.write_text("{}\n")
+        script = tmp_path / "fake_codex.sh"
+        script.write_text(
+            "#!/bin/bash\n"
+            'echo \'{"type":"thread.started","thread_id":"t-abc"}\'\n'
+        )
+        script.chmod(0o755)
+        monkeypatch.setattr(codex_runner, "find_codex_binary", lambda: str(script))
+
+        def run(program):
+            return codex_runner.run_codex(
+                project_dir=str(tmp_path), prompt="x", model="m", effort="low",
+                sandbox="read-only",
+                output_file=str(tmp_path / "o.txt"),
+                prompt_file=str(tmp_path / "p.txt"),
+                stderr_file=str(tmp_path / "e.txt"),
+                timeout=30, cyber_access_program=program,
+            )
+
+        assert run("daybreak_blue")["rollout_path"] == str(rollout)
+        assert run(None)["rollout_path"] is None
 
 
 class TestClassifyFailure:
@@ -538,7 +608,16 @@ class TestResetHintExtraction:
 
 
 class TestDaybreakRefusals:
-    """The backend's two 403s for a requested cyber program (codex-cli 0.159.2)."""
+    """The backend's two 403s for a requested cyber program (codex-cli 0.159.2,
+    unchanged in 0.167.0), and a CLI too old to request one."""
+
+    def test_cli_without_the_flag(self):
+        # codex-cli 0.159.2's own words, on stderr with exit 2.
+        with pytest.raises(CodexError, match="codex update"):
+            _classify_failure(
+                "error: unexpected argument '--cyber-access-program' found\n\n"
+                "  tip: to pass '--cyber-access-program' as a value, use "
+                "'-- --cyber-access-program'", "", 2)
 
     def test_unapproved_account(self):
         with pytest.raises(CodexError, match="refused Daybreak") as info:

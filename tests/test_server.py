@@ -408,12 +408,13 @@ class TestModelsTool:
         assert result["configured_default"]["model"] == "gpt-6.1-sol"
         assert "gpt-5.3-codex" in result["deprecated"]
 
-    def test_configured_default_reports_the_daybreak_build(
+    def test_configured_default_reports_its_daybreak_program(
         self, daybreak_account, monkeypatch
     ):
         monkeypatch.setenv("CODEX_MODEL", "gpt-5.6-sol")
         result = _call(codex_models)
-        assert result["configured_default"]["model"] == "gpt-daybreak-blue-latest"
+        assert result["configured_default"]["model"] == "gpt-5.6-sol"
+        assert result["configured_default"]["cyber_access_program"] == "daybreak_blue"
 
 
 def _live_catalog(*slugs, daybreak=()):
@@ -446,26 +447,28 @@ def daybreak_account(monkeypatch):
     )
 
 
-class TestDaybreakVariants:
-    """A model with a Daybreak build runs as that build when the account has it.
+class TestDaybreakProgram:
+    """A model runs under Daybreak Blue when the account's catalog offers it.
 
-    gpt-daybreak-blue-latest is gpt-5.6-sol under the Daybreak program, not a
-    tier above GPT-6. Routing everything to it would quietly downgrade the
-    gpt-6.1-sol default.
+    The model itself never changes. gpt-5.6-sol used to be swapped for
+    gpt-daybreak-blue-latest, the only way exec could reach Daybreak before
+    codex-cli 0.167 added --cyber-access-program.
     """
 
-    def test_base_model_runs_as_its_daybreak_build(self, project, daybreak_account):
+    def test_model_runs_as_itself_under_the_program(self, project, daybreak_account):
         result = _call(
             codex_delegate, task="do x", project_dir=project, model="gpt-5.6-sol"
         )
-        assert result["model"] == "gpt-daybreak-blue-latest"
+        assert result["model"] == "gpt-5.6-sol"
+        assert result["cyber_access_program"] == "daybreak_blue"
 
-    def test_configured_base_model_is_swapped_too(
+    def test_configured_model_gets_it_too(
         self, project, daybreak_account, monkeypatch
     ):
         monkeypatch.setenv("CODEX_MODEL", "gpt-5.6-sol")
         result = _call(codex_review, project_dir=project)
-        assert result["model"] == "gpt-daybreak-blue-latest"
+        assert result["model"] == "gpt-5.6-sol"
+        assert result["cyber_access_program"] == "daybreak_blue"
 
     def test_default_gpt6_1_sol_is_not_downgraded(self, project, daybreak_account):
         result = _call(codex_delegate, task="do x", project_dir=project)
@@ -474,8 +477,7 @@ class TestDaybreakVariants:
     def test_gpt6_sol_runs_as_itself_under_daybreak_blue(
         self, project, daybreak_account
     ):
-        # Not swapped for the Daybreak slug, which is a generation older: the
-        # program is requested on gpt-6-sol's own turns, over app-server.
+        # The program is requested on gpt-6-sol's own turns.
         result = _call(
             codex_delegate, task="do x", project_dir=project, model="gpt-6-sol"
         )
@@ -486,17 +488,22 @@ class TestDaybreakVariants:
         status = _call(codex_status, job_id=result["job_id"])
         assert status["cyber_access_program"] == "daybreak_blue"
 
-    def test_default_and_slug_swapped_jobs_request_no_program(
-        self, project, daybreak_account
-    ):
-        # Both run on exec: 6.1 Sol has no Daybreak, and the Daybreak slug is
-        # Daybreak already.
+    def test_default_gpt6_1_sol_requests_no_program(self, project, daybreak_account):
+        # Daybreak on 6.1 Sol needs Daybreak Red, so its catalog lists only
+        # `standard`.
         assert _call(codex_delegate, task="do x", project_dir=project)[
             "cyber_access_program"] is None
-        swapped = _call(
-            codex_delegate, task="do x", project_dir=project, model="gpt-5.6-sol"
+
+    def test_the_daybreak_slug_requests_its_program_explicitly(
+        self, project, daybreak_account
+    ):
+        # Its catalog entry lists daybreak_blue, so it is requested like any
+        # other model's and verified from the rollout.
+        result = _call(
+            codex_delegate, task="do x", project_dir=project,
+            model="gpt-daybreak-blue-latest",
         )
-        assert swapped["cyber_access_program"] is None
+        assert result["cyber_access_program"] == "daybreak_blue"
 
     def test_gpt6_sol_on_an_unapproved_account_gets_no_program(
         self, project, monkeypatch
@@ -518,15 +525,16 @@ class TestDaybreakVariants:
         result = _call(codex_models)
         assert result["configured_default"]["cyber_access_program"] == "daybreak_blue"
 
-    def test_models_without_a_daybreak_build_are_untouched(
+    def test_models_the_catalog_offers_no_daybreak_for_are_untouched(
         self, project, daybreak_account
     ):
         result = _call(
             codex_delegate, task="do x", project_dir=project, model="gpt-6-astra"
         )
         assert result["model"] == "gpt-6-astra"
+        assert result["cyber_access_program"] is None
 
-    def test_account_without_daybreak_keeps_the_base(self, project, monkeypatch):
+    def test_account_without_daybreak_gets_no_program(self, project, monkeypatch):
         models._cache.clear()
         monkeypatch.setattr(
             models, "_query_catalog",
@@ -536,15 +544,16 @@ class TestDaybreakVariants:
             codex_delegate, task="do x", project_dir=project, model="gpt-5.6-sol"
         )
         assert result["model"] == "gpt-5.6-sol"
+        assert result["cyber_access_program"] is None
 
     def test_fallback_catalog_never_selects_daybreak(self, project):
-        # The fallback lists Daybreak for everyone; trusting it would send an
-        # unapproved account to a model codex refuses.
-        assert "gpt-daybreak-blue-latest" in models.FALLBACK_CATALOG
+        # The fallback carries no programs; guessing would send an unapproved
+        # account a request codex refuses.
         result = _call(
-            codex_delegate, task="do x", project_dir=project, model="gpt-5.6-sol"
+            codex_delegate, task="do x", project_dir=project, model="gpt-6-sol"
         )
-        assert result["model"] == "gpt-5.6-sol"
+        assert result["model"] == "gpt-6-sol"
+        assert result["cyber_access_program"] is None
 
     def test_can_be_turned_off(self, project, daybreak_account, monkeypatch):
         monkeypatch.setenv("CODEX_PREFER_DAYBREAK", "false")
@@ -596,12 +605,15 @@ class TestDaybreakVariants:
         assert result["model"] == "gpt-6.1-sol"
         assert result["cyber_access_program"] is None
 
-    def test_follow_up_swaps_an_explicit_model(self, project, daybreak_account):
-        job_id = self._finished_job(project, "gpt-6-sol")
+    def test_follow_up_resolves_an_explicit_models_program(
+        self, project, daybreak_account
+    ):
+        job_id = self._finished_job(project, "gpt-6.1-sol")
         result = _call(
             codex_follow_up, job_id=job_id, task="more", model="gpt-5.6-sol"
         )
-        assert result["model"] == "gpt-daybreak-blue-latest"
+        assert result["model"] == "gpt-5.6-sol"
+        assert result["cyber_access_program"] == "daybreak_blue"
 
 
 class TestErrorClassification:

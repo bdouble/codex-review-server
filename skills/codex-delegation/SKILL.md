@@ -45,13 +45,13 @@ Don't ask the user — choose, then say what you chose and why.
 | Complex, demanding work where you want the best model | `gpt-6-astra` | `high`–`max` |
 | Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-6.1-sol` | `ultra` |
 
-**Daybreak is applied for you.** On an approved account the server runs
-`gpt-6-sol` under the Daybreak Blue cyber program, and `gpt-5.6-sol` as
-`gpt-daybreak-blue-latest` (the same snapshot under the program). Route
-security work to `gpt-6-sol`, as the table says, and leave other work on
-`gpt-6.1-sol`: Daybreak only changes how the model handles security work.
-`gpt-6.1-sol` and `gpt-6-astra` get no Daybreak here, because it needs Daybreak
-Red approval on them.
+**Daybreak is applied for you.** On an approved account the server runs any
+model the live catalog offers it for under the Daybreak Blue cyber program:
+`gpt-6-sol`, the Luna models and the GPT-5.6 models. Route security work to
+`gpt-6-sol`, as the table says, and leave other work on `gpt-6.1-sol`:
+Daybreak only changes how the model handles security work. `gpt-6.1-sol`,
+`gpt-6.1-terra` and `gpt-6-astra` get no Daybreak here, because it needs
+Daybreak Red approval on them.
 
 The launch response's `cyber_access_program` says whether Daybreak applied.
 `null` on a `gpt-6-sol` job means it runs with standard safeguards: the
@@ -62,8 +62,7 @@ check, read from codex's own record of the turn.
 
 Constraints that are enforced, not advisory:
 
-- **Effort validity is per-model.** The Luna models have no `ultra`. `gpt-5.5`
-  tops out at `xhigh` — no `max`, no `ultra`.
+- **Effort validity is per-model.** The Luna models have no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
 - **5.6 Sol and `gpt-daybreak-blue-latest` are strong at low effort.** Start
   lower than instinct suggests; their own default is `low`.
