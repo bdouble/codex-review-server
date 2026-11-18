@@ -15,35 +15,47 @@ import shutil
 import subprocess
 import time
 
-# Verified against codex-cli 0.167.0 on 2026-11-08 via `codex debug models`.
+# Verified against codex-cli 0.170.0 on 2026-11-18 via `codex debug models`.
 # Only used when the live query fails (codex missing, offline, format change).
 #
 # Entries here are a last-known-good snapshot, never an allow-list: the live
 # catalog is always preferred, and `validate` lets unknown slugs through.
 FALLBACK_CATALOG = {
-    "gpt-6.1-sol": {
+    "gpt-6.2-sol": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "low",
-        "display_name": "GPT-6.1-Sol",
-        "description": "Latest workhorse model for coding and everyday work.",
+        "display_name": "GPT-6.2-Sol",
+        "description": "Fast, go-to model for coding and everyday work.",
     },
-    "gpt-6-astra": {
+    "gpt-6.2-astra": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
-        "default_effort": "medium",
-        "display_name": "GPT-6-Astra",
-        "description": "Frontier intelligence for the most demanding work.",
+        "default_effort": "low",
+        "display_name": "GPT-6.2-Astra",
+        "description": "Our most capable model for complex coding and professional work.",
     },
     "gpt-6.1-terra": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "low",
         "display_name": "GPT-6.1 Terra",
-        "description": "GPT-6.1 Terra Codex model.",
+        "description": "Efficient model that excels at visual understanding and computer use.",
+    },
+    "gpt-6.1-sol": {
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "default_effort": "low",
+        "display_name": "GPT-6.1-Sol",
+        "description": "Previous generation model for coding and everyday work.",
+    },
+    "gpt-6-astra": {
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "default_effort": "medium",
+        "display_name": "GPT-6-Astra",
+        "description": "Previous generation model for complex coding and professional work.",
     },
     "gpt-6-sol": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "medium",
         "display_name": "GPT-6-Sol",
-        "description": "Previous generation workhorse model.",
+        "description": "Legacy model for coding and everyday work.",
     },
     "gpt-6-luna": {
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -55,19 +67,19 @@ FALLBACK_CATALOG = {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "low",
         "display_name": "GPT-5.6-Sol",
-        "description": "Older generation workhorse model.",
+        "description": "Legacy model for coding and everyday work.",
     },
     "gpt-5.6-terra": {
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "default_effort": "medium",
         "display_name": "GPT-5.6-Terra",
-        "description": "Older balanced model for straightforward work.",
+        "description": "Legacy balanced model for agentic coding.",
     },
     "gpt-5.6-luna": {
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "medium",
         "display_name": "GPT-5.6-Luna",
-        "description": "Older fast and efficient model.",
+        "description": "Legacy fast model for simpler tasks.",
     },
     # Access-gated: present only on accounts approved for it, so it is absent
     # from most live catalogs. Listing it here is harmless — the fallback is

@@ -56,16 +56,17 @@ Durable capability tiers rather than a version list:
 
 | Model | Best for | Efforts |
 |-------|----------|---------|
-| `gpt-6.1-sol` | The latest workhorse for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
-| `gpt-6-astra` | Frontier intelligence for the most demanding work. | low → xhigh, `max`, `ultra` |
-| `gpt-6.1-terra` | GPT-6.1 Terra. Its catalog default effort is `low`. | low → xhigh, `max`, `ultra` |
-| `gpt-6-sol` | Previous-generation workhorse, and the Daybreak Blue model for defensive security work on approved accounts. | low → xhigh, `max`, `ultra` |
+| `gpt-6.2-sol` | Fast, go-to model for coding and everyday work. **Default.** | low → xhigh, `max`, `ultra` |
+| `gpt-6.2-astra` | The most capable model, for complex coding and professional work. | low → xhigh, `max`, `ultra` |
+| `gpt-6.1-terra` | Efficient; strong at visual understanding and computer use. Its catalog default effort is `low`. | low → xhigh, `max`, `ultra` |
+| `gpt-6.1-sol` / `gpt-6-astra` | Previous generation of Sol and Astra. | low → xhigh, `max`, `ultra` |
+| `gpt-6-sol` | Older workhorse, and the Daybreak Blue model for defensive security work on approved accounts. | low → xhigh, `max`, `ultra` |
 | `gpt-6-luna` | Fast and affordable, for easier tasks. | low → xhigh, `max` |
 | `gpt-daybreak-blue-latest` | `gpt-5.6-sol` under the Daybreak Blue cyber program. Access-gated. | low → xhigh, `max`, `ultra` |
-| `gpt-5.6-sol` / `gpt-5.6-terra` | Previous generation. | low → xhigh, `max`, `ultra` |
-| `gpt-5.6-luna` | Previous generation, fast. | low → xhigh, `max` |
+| `gpt-5.6-sol` / `gpt-5.6-terra` | Legacy. | low → xhigh, `max`, `ultra` |
+| `gpt-5.6-luna` | Legacy, fast. | low → xhigh, `max` |
 
-Default: **`gpt-6.1-sol` at `high`**.
+Default: **`gpt-6.2-sol` at `high`**.
 
 **Daybreak is applied where the account has it.** Daybreak Blue is a cyber
 access program, and on an approved account the live catalog says which models
@@ -76,7 +77,7 @@ mainline Daybreak Blue model), the Luna models and the GPT-5.6 models. The flag
 is experimental, so the job's verification reads codex's own record of the
 turn and fails if the program was not sent.
 
-`gpt-6.1-sol`, `gpt-6.1-terra` and `gpt-6-astra` get Daybreak only with Daybreak
+The GPT-6.2 and GPT-6.1 models and `gpt-6-astra` get Daybreak only with Daybreak
 Red approval, so their catalog entries list just the standard program, and
 they run without it. Each job reports `cyber_access_program`, so you can see
 whether Daybreak was requested. `CODEX_PREFER_DAYBREAK=false` turns all of this off
@@ -94,8 +95,9 @@ Things that will bite you if you don't know them — all enforced by the server:
 - **Effort validity is per-model.** Luna (5.6 and 6) has no `ultra`. An
   invalid pair is rejected up front rather than failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **5.6 Sol and `gpt-daybreak-blue-latest` default to `low`** and are strong there. Start lower than
-  you'd think.
+- **Most Sol, Astra and Terra models default to `low`** in the catalog and are
+  strong there, the 6.2 models included. Start lower than you'd think;
+  `codex_models` lists each model's default.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.
 - **Use the full slug.** Bare `gpt-5.6` does not resolve under ChatGPT auth.
@@ -298,7 +300,7 @@ a restart.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | `gpt-6.1-sol` | Default model slug |
+| `CODEX_MODEL` | `gpt-6.2-sol` | Default model slug |
 | `CODEX_PREFER_DAYBREAK` | `true` | Run any model under Daybreak Blue when the account's live catalog offers it for that model |
 | `CODEX_EFFORT` | `high` | Default reasoning effort |
 | `CODEX_TIMEOUT` | `4500` | Per-job timeout, seconds |
@@ -410,7 +412,7 @@ server.py ──► jobs/<id>.json          (job record; atomic writes)
     │
     ├─► worker.py (detached, reparented to init)
     │       │
-    │       ├─► codex exec --model gpt-6.1-sol -c model_reasoning_effort="high"
+    │       ├─► codex exec --model gpt-6.2-sol -c model_reasoning_effort="high"
     │       │     --sandbox read-only --json -o <out>    (runs IN your repo)
     │       │     [--cyber-access-program daybreak_blue]  (Daybreak jobs)
     │       │        │ streams JSONL events → phase, thread_id, token usage

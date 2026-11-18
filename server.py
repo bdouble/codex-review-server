@@ -359,7 +359,7 @@ def codex_delegate(
         task: The complete task. Be specific about what "done" means — Codex
             cannot ask clarifying questions mid-run.
         project_dir: Absolute path to the working directory.
-        model: Model slug (e.g. "gpt-6.1-sol"). Defaults to CODEX_MODEL. Runs
+        model: Model slug (e.g. "gpt-6.2-sol"). Defaults to CODEX_MODEL. Runs
             under Daybreak Blue when the account's catalog offers it for that
             model (e.g. gpt-6-sol); the response's cyber_access_program says
             so. Call codex_models for the live catalog.

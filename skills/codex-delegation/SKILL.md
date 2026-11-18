@@ -1,6 +1,6 @@
 ---
 name: codex-delegation
-description: "Delegate work to OpenAI Codex from Claude Code and manage it to completion. Use when the user says delegate/hand off/farm out to Codex, asks for a second model's opinion or a cross-model review, wants several tasks run in parallel, or mentions codex_delegate / GPT-6.1 / GPT-6 / GPT-5.6 / Astra / Sol / Terra / Luna / Daybreak. Also read this before choosing a Codex model or reasoning effort, before sending a follow-up to an existing Codex job, and before reporting what a Codex job did."
+description: "Delegate work to OpenAI Codex from Claude Code and manage it to completion. Use when the user says delegate/hand off/farm out to Codex, asks for a second model's opinion or a cross-model review, wants several tasks run in parallel, or mentions codex_delegate / GPT-6.2 / GPT-6.1 / GPT-6 / GPT-5.6 / Astra / Sol / Terra / Luna / Daybreak. Also read this before choosing a Codex model or reasoning effort, before sending a follow-up to an existing Codex job, and before reporting what a Codex job did."
 ---
 
 # Delegating to Codex
@@ -38,17 +38,17 @@ Don't ask the user — choose, then say what you chose and why.
 | Task | Model | Effort |
 |---|---|---|
 | Extraction, classification, structured summaries, easy tasks | `gpt-6-luna` | `low`–`medium` |
-| Ordinary engineering: implement, fix, refactor, test | `gpt-6.1-sol` | `high`–`xhigh` |
-| Code review | `gpt-6.1-sol` | `high`–`xhigh` |
+| Ordinary engineering: implement, fix, refactor, test | `gpt-6.2-sol` | `high`–`xhigh` |
+| Code review | `gpt-6.2-sol` | `high`–`xhigh` |
 | Security review, vulnerability hunting, hardening | `gpt-6-sol` (runs under Daybreak Blue) | `high`–`xhigh` |
-| Ambiguous, high-value, or genuinely hard problems | `gpt-6.1-sol` | `xhigh`–`max` |
-| Complex, demanding work where you want the best model | `gpt-6-astra` | `high`–`max` |
-| Last-resort hard problems where you'd otherwise be stuck | `gpt-6-astra` or `gpt-6.1-sol` | `ultra` |
+| Ambiguous, high-value, or genuinely hard problems | `gpt-6.2-sol` | `xhigh`–`max` |
+| Complex, demanding work where you want the best model | `gpt-6.2-astra` | `high`–`max` |
+| Last-resort hard problems where you'd otherwise be stuck | `gpt-6.2-astra` or `gpt-6.2-sol` | `ultra` |
 
 **Daybreak is applied for you.** On an approved account the server runs any
 model the live catalog offers it for under the Daybreak Blue cyber program:
 `gpt-6-sol`, the Luna models and the GPT-5.6 models. Route security work to
-`gpt-6-sol`, as the table says, and leave other work on `gpt-6.1-sol`:
+`gpt-6-sol`, as the table says, and leave other work on `gpt-6.2-sol`:
 Daybreak only changes how the model handles security work. A model whose
 `cyber_access_programs` in `codex_models` lists only `standard` gets no
 Daybreak here: on it, Daybreak needs Daybreak Red approval.
@@ -65,12 +65,13 @@ Constraints that are enforced, not advisory:
 
 - **Effort validity is per-model.** The Luna models have no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
-- **5.6 Sol and `gpt-daybreak-blue-latest` are strong at low effort.** Start
-  lower than instinct suggests; their own default is `low`.
+- **The 6.2 models are strong at low effort**, as are 6.1 Sol and Terra, 5.6
+  Sol and `gpt-daybreak-blue-latest`. Start lower than instinct suggests;
+  their own default is `low`, and `codex_models` lists each model's.
 - **Daybreak Blue is access-gated.** It exists only on approved accounts. In
   `codex_models`, `gpt-6-sol`'s `cyber_access_programs` lists `daybreak_blue`
   where the account has it. Where it doesn't, route security work to
-  `gpt-6.1-sol` instead: `gpt-6-sol` without Daybreak is just the older model.
+  `gpt-6.2-sol` instead: `gpt-6-sol` without Daybreak is just an older model.
 - **Always use the full slug.** Bare `gpt-5.6` fails under ChatGPT auth, and
   the Daybreak slug really does end in `-latest`.
 

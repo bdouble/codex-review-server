@@ -100,7 +100,7 @@ claude mcp add --scope user codex-delegate -- $(pwd)/.venv/bin/python3 $(pwd)/se
 
 ## Codex CLI Gotchas
 
-Re-verified against codex-cli 0.167.0 on 2026-11-08. These contradict parts of
+Re-verified against codex-cli 0.170.0 on 2026-11-18. These contradict parts of
 the published docs — trust the CLI, and re-verify with `codex exec --help`
 before assuming.
 
@@ -115,7 +115,8 @@ before assuming.
   runs jobs without Daybreak there, with a launch `warning`. The request keeps
   `wanted_cyber_access_program`, so follow-ups regain Daybreak after
   `codex update`. GPT-6.1 Sol needs ≥ 0.159, and GPT-6 Sol and Luna ≥ 0.156:
-  older CLIs don't list them.
+  older CLIs don't list them. GPT-6.2 Sol and Astra are listed on 0.167.0 and
+  0.170.0; nothing older was checked.
 - **Effort support is per-model.** Luna (5.6 and 6) has no `ultra`. Codex
   does not enforce this itself (6 Luna at `ultra` exits 0), so our up-front
   check is the only guard. `codex debug models` is the authority, and it is
@@ -153,6 +154,11 @@ before assuming.
 - **stderr carries noise on successful runs** (other MCP servers in the user's
   codex config log auth errors there). Only classify errors when the exit code
   is non-zero.
+- **An expired login is prose too, and it fakes a catalog.** The turn fails
+  with "Your access token could not be refreshed … Please log out and sign in
+  again": no 401, no `codex login`. `codex login status` still says logged in,
+  and `codex debug models` still exits 0, printing the binary's bundled list:
+  no `available_access_programs`, plus slugs the account can't run (`gpt-5.5`).
 - **Out-of-quota is prose, not a code.** 0.154.0 says "You've hit your usage
   limit … or try again at `<date>`" — no `usage_limit_reached`, no 429. Match
   the wording, and re-check it after a CLI upgrade.
@@ -167,7 +173,7 @@ All optional; configured in `.env` (see `.env.example`). The older
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `CODEX_MODEL` | `gpt-6.1-sol` | Validated against the live catalog |
+| `CODEX_MODEL` | `gpt-6.2-sol` | Validated against the live catalog |
 | `CODEX_PREFER_DAYBREAK` | `true` | Run any model under Daybreak Blue when the account's live catalog offers it for that model |
 | `CODEX_EFFORT` | `high` | `low`/`medium`/`high`/`xhigh`/`max`/`ultra` |
 | `CODEX_TIMEOUT` | `4500` | Seconds; repo-aware work takes 10-20 min, `ultra` longer |
