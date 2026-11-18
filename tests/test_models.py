@@ -449,10 +449,6 @@ class TestCodex0159Catalog:
         assert "ultra" in entry["efforts"]
         assert entry["default_effort"] == "low"
 
-    def test_default_model_is_gpt6_1_sol(self):
-        assert config.DEFAULT_MODEL == "gpt-6.1-sol"
-        assert config.DEFAULT_MODEL in models.FALLBACK_CATALOG
-
 
 # codex-cli 0.167.0, verified live on 2026-11-08: gpt-6.1-terra is new, and
 # gpt-5.5 is gone ("not supported when using Codex with a ChatGPT account").
@@ -480,12 +476,46 @@ class TestCodex0167Catalog:
         assert "deprecated" in error and "gpt-6.1-terra" in error
 
 
+# codex-cli 0.170.0, verified live on 2026-11-18: gpt-6.2-sol and
+# gpt-6.2-astra are new. 0.167.0 lists them too.
+SAMPLE_0170 = {"models": [
+    {**_entry("gpt-6.2-sol", _ALL), "default_reasoning_level": "low"},
+    {**_entry("gpt-6.2-astra", _ALL), "default_reasoning_level": "low"},
+    *SAMPLE_0167["models"],
+]}
+
+
+class TestCodex0170Catalog:
+    def test_gpt6_2_models_are_listed_with_every_effort(self, monkeypatch):
+        _stub_codex(monkeypatch, json.dumps(SAMPLE_0170))
+        catalog = models.get_catalog()
+        for slug in ("gpt-6.2-sol", "gpt-6.2-astra"):
+            assert catalog[slug]["default_effort"] == "low"
+            assert models.validate(slug, "ultra") is None
+
+    def test_fallback_carries_the_gpt6_2_models(self):
+        for slug in ("gpt-6.2-sol", "gpt-6.2-astra"):
+            entry = models.FALLBACK_CATALOG[slug]
+            assert "ultra" in entry["efforts"]
+            assert entry["default_effort"] == "low"
+
+    def test_fallback_keeps_the_models_they_replace(self):
+        # Still live-listed, and gpt-6-sol is the Daybreak Blue route.
+        for slug in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol"):
+            assert slug in models.FALLBACK_CATALOG
+
+    def test_default_model_is_gpt6_2_sol(self):
+        assert config.DEFAULT_MODEL == "gpt-6.2-sol"
+        assert config.DEFAULT_MODEL in models.FALLBACK_CATALOG
+
+
 def _with_programs(entry, *programs):
     return {**entry, "available_access_programs": {"cyber": list(programs)}}
 
 
 # How the primary (Daybreak-approved) account's 0.159.2 catalog lists programs.
 SAMPLE_DAYBREAK_ACCOUNT = {"models": [
+    _with_programs(_entry("gpt-6.2-sol", _ALL), "standard"),
     _with_programs(_entry("gpt-6.1-sol", _ALL), "standard"),
     _with_programs(_entry("gpt-6-sol", _ALL), "standard", "daybreak_blue"),
     _with_programs(_entry("gpt-6-luna", _ALL[:-1]), "standard", "daybreak_blue"),
@@ -518,6 +548,7 @@ class TestDaybreakProgram:
     def test_none_where_the_model_needs_daybreak_red(self, monkeypatch):
         _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))
         assert models.daybreak_program("gpt-6.1-sol") is None
+        assert models.daybreak_program("gpt-6.2-sol") is None
 
     def test_none_for_a_model_the_catalog_does_not_list(self, monkeypatch):
         _stub_codex(monkeypatch, json.dumps(SAMPLE_DAYBREAK_ACCOUNT))

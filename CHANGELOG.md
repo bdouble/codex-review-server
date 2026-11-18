@@ -5,6 +5,37 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] — 2026-11-18
+
+**GPT-6.2 Sol and Astra.** Verified against **codex-cli 0.170.0**, whose only
+flag change is a new `--trust` on `exec` and `exec resume`, which the server
+does not use.
+
+### Added
+
+- **GPT-6.2 Sol (`gpt-6.2-sol`)**, the go-to model for coding and everyday
+  work, and **GPT-6.2 Astra (`gpt-6.2-astra`)**, the most capable model. Both
+  take every effort up to `ultra`, with a catalog default of `low`.
+
+### Changed
+
+- **Default is now `gpt-6.2-sol` at `high`** (was `gpt-6.1-sol`). An existing
+  `.env` that sets `CODEX_MODEL=gpt-6.1-sol` keeps 6.1 Sol until you change it.
+- `/codex:delegate` and `/codex:review` aliases: `sol` now means
+  `gpt-6.2-sol` and `astra` means `gpt-6.2-astra`. `gpt-6.1-sol` and
+  `gpt-6-astra` remain reachable by full slug. The delegation skill routes
+  engineering, review and hard problems to the 6.2 models.
+- **Security work stays on `gpt-6-sol` under Daybreak Blue.** Both 6.2 models
+  list only the standard cyber program, so they run without Daybreak.
+- The fallback catalog's descriptions match the live catalog's new wording.
+
+### Fixed
+
+- **An expired login is classified as an auth error.** Codex reports it as
+  "Your access token could not be refreshed … Please log out and sign in
+  again", with no 401 and no mention of `codex login`, so it came back as an
+  unclassified failure without the advice to run `codex login`.
+
 ## [2.6.0] — 2026-11-08
 
 **Daybreak over `codex exec`.** codex-cli 0.167.0 adds

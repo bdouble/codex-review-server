@@ -130,7 +130,7 @@ class TestDelegateLaunch:
 
     def test_uses_configured_default_model(self, project):
         result = _call(codex_delegate, task="do x", project_dir=project)
-        assert result["model"] == "gpt-6.1-sol"
+        assert result["model"] == "gpt-6.2-sol"
         assert result["effort"] == "high"
 
     def test_model_override(self, project):
@@ -407,8 +407,8 @@ class TestReviewTools:
 class TestModelsTool:
     def test_lists_models_and_configured_default(self):
         result = _call(codex_models)
-        assert "gpt-6.1-sol" in result["models"]
-        assert result["configured_default"]["model"] == "gpt-6.1-sol"
+        assert "gpt-6.2-sol" in result["models"]
+        assert result["configured_default"]["model"] == "gpt-6.2-sol"
         assert "gpt-5.3-codex" in result["deprecated"]
 
     def test_configured_default_reports_its_daybreak_program(
@@ -443,8 +443,8 @@ def daybreak_account(monkeypatch):
     monkeypatch.setattr(
         models, "_query_catalog",
         lambda codex_home=None: _live_catalog(
-            "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-5.6-sol",
-            "gpt-daybreak-blue-latest",
+            "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra",
+            "gpt-6-sol", "gpt-5.6-sol", "gpt-daybreak-blue-latest",
             daybreak=("gpt-6-sol", "gpt-5.6-sol", "gpt-daybreak-blue-latest"),
         ),
     )
@@ -473,9 +473,9 @@ class TestDaybreakProgram:
         assert result["model"] == "gpt-5.6-sol"
         assert result["cyber_access_program"] == "daybreak_blue"
 
-    def test_default_gpt6_1_sol_is_not_downgraded(self, project, daybreak_account):
+    def test_default_gpt6_2_sol_is_not_downgraded(self, project, daybreak_account):
         result = _call(codex_delegate, task="do x", project_dir=project)
-        assert result["model"] == "gpt-6.1-sol"
+        assert result["model"] == "gpt-6.2-sol"
 
     def test_gpt6_sol_runs_as_itself_under_daybreak_blue(
         self, project, daybreak_account

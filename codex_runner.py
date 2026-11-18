@@ -8,7 +8,7 @@ Two things here are easy to get wrong and are handled explicitly:
 
 1. `codex exec` and `codex exec resume` do NOT share a flag set. `resume`
    rejects `--sandbox`, `--color`, and `-C/--cd`. Sandbox on a resume must go
-   through `-c sandbox_mode=...` instead. Re-verified against codex-cli 0.167.0.
+   through `-c sandbox_mode=...` instead. Re-verified against codex-cli 0.170.0.
 
 2. The prompt is fed via stdin (with `-` as the positional) rather than
    interpolated into an argv string. Task text routinely contains backticks and
@@ -173,8 +173,15 @@ def _match_failure(text: str) -> tuple[type[CodexError], str] | None:
     # than the bare "unauthorized" / "authentication failed" / "please login"
     # substrings this used to accept — those fire on any stderr that merely
     # mentions the word, which is most of them.
+    #
+    # An expired login is prose with neither anchor (codex-cli 0.167.0 and
+    # 0.170.0): "Your access token could not be refreshed because your refresh
+    # token was already used. Please log out and sign in again." Match codex's
+    # own sentence, not "refresh token": MCP servers log failed token
+    # refreshes of their own.
     is_auth_error = re.search(
-        r"(?:http|status|code)\s+401\b|401\s+unauthorized|\bcodex\s+login\b",
+        r"(?:http|status|code)\s+401\b|401\s+unauthorized|\bcodex\s+login\b"
+        r"|access token could not be refreshed",
         lowered,
     ) is not None
     if is_auth_error:

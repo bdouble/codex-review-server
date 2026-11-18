@@ -269,6 +269,21 @@ class TestClassifyFailure:
         with pytest.raises(CodexAuthError, match="codex login"):
             _classify_failure("401 unauthorized", "", 1)
 
+    def test_expired_login_prose_is_an_auth_error(self):
+        # codex-cli 0.167.0 and 0.170.0, verbatim: no 401, no "codex login".
+        with pytest.raises(CodexAuthError, match="codex login"):
+            _classify_failure(
+                "",
+                "Your access token could not be refreshed because your refresh "
+                "token was already used. Please log out and sign in again.",
+                1,
+            )
+
+    def test_a_bystanders_failed_token_refresh_is_not_an_auth_error(self):
+        with pytest.raises(CodexError) as excinfo:
+            _classify_failure("[mcp:notion] WARN failed to refresh token", "", 1)
+        assert not isinstance(excinfo.value, CodexAuthError)
+
     def test_bare_401_substring_is_not_an_auth_error(self):
         with pytest.raises(CodexError) as excinfo:
             _classify_failure("wrote 401 lines to file", "", 1)
