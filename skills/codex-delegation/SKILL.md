@@ -65,8 +65,9 @@ Constraints that are enforced, not advisory:
 
 - **Effort validity is per-model.** The Luna models have no `ultra`.
 - **`ultra` runs several agents in parallel.** Slow and expensive. Justify it.
-- **5.6 Sol and `gpt-daybreak-blue-latest` are strong at low effort.** Start
-  lower than instinct suggests; their own default is `low`.
+- **The 6.2 models are strong at low effort**, as are 6.1 Sol and Terra, 5.6
+  Sol and `gpt-daybreak-blue-latest`. Start lower than instinct suggests;
+  their own default is `low`, and `codex_models` lists each model's.
 - **Daybreak Blue is access-gated.** It exists only on approved accounts. In
   `codex_models`, `gpt-6-sol`'s `cyber_access_programs` lists `daybreak_blue`
   where the account has it. Where it doesn't, route security work to

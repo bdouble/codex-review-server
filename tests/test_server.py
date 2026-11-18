@@ -491,8 +491,8 @@ class TestDaybreakProgram:
         status = _call(codex_status, job_id=result["job_id"])
         assert status["cyber_access_program"] == "daybreak_blue"
 
-    def test_default_gpt6_1_sol_requests_no_program(self, project, daybreak_account):
-        # Daybreak on 6.1 Sol needs Daybreak Red, so its catalog lists only
+    def test_default_gpt6_2_sol_requests_no_program(self, project, daybreak_account):
+        # Daybreak on 6.2 Sol needs Daybreak Red, so its catalog lists only
         # `standard`.
         assert _call(codex_delegate, task="do x", project_dir=project)[
             "cyber_access_program"] is None

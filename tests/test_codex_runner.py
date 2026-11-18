@@ -269,13 +269,32 @@ class TestClassifyFailure:
         with pytest.raises(CodexAuthError, match="codex login"):
             _classify_failure("401 unauthorized", "", 1)
 
-    def test_expired_login_prose_is_an_auth_error(self):
-        # codex-cli 0.167.0 and 0.170.0, verbatim: no 401, no "codex login".
+    # The five wordings in the codex-cli 0.170.0 binary. "was already used" was
+    # seen live on 0.167.0 and 0.170.0, on turn.failed, the error event and
+    # stderr at once. None has a 401 or mentions "codex login".
+    @pytest.mark.parametrize("message", [
+        "Your access token could not be refreshed because your refresh token "
+        "has expired. Please log out and sign in again.",
+        "Your access token could not be refreshed because your refresh token "
+        "was already used. Please log out and sign in again.",
+        "Your access token could not be refreshed because your refresh token "
+        "was revoked. Please log out and sign in again.",
+        "Your access token could not be refreshed. Please log out and sign in "
+        "again.",
+        "Your access token could not be refreshed because you have since "
+        "logged out or signed in to another account. Please sign in again.",
+    ])
+    def test_expired_login_prose_is_an_auth_error(self, message):
+        with pytest.raises(CodexAuthError, match="codex login"):
+            _classify_failure("", message, 1)
+
+    def test_expired_login_on_stderr_alone_is_an_auth_error(self):
         with pytest.raises(CodexAuthError, match="codex login"):
             _classify_failure(
-                "",
+                "ERROR codex_login::auth::manager: Failed to refresh token: "
                 "Your access token could not be refreshed because your refresh "
                 "token was already used. Please log out and sign in again.",
+                "",
                 1,
             )
 

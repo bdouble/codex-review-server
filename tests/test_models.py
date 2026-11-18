@@ -513,7 +513,7 @@ def _with_programs(entry, *programs):
     return {**entry, "available_access_programs": {"cyber": list(programs)}}
 
 
-# How the primary (Daybreak-approved) account's 0.159.2 catalog lists programs.
+# How the primary (Daybreak-approved) account's catalog lists programs.
 SAMPLE_DAYBREAK_ACCOUNT = {"models": [
     _with_programs(_entry("gpt-6.2-sol", _ALL), "standard"),
     _with_programs(_entry("gpt-6.1-sol", _ALL), "standard"),

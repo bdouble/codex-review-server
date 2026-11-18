@@ -95,8 +95,9 @@ Things that will bite you if you don't know them — all enforced by the server:
 - **Effort validity is per-model.** Luna (5.6 and 6) has no `ultra`. An
   invalid pair is rejected up front rather than failing ten minutes in.
 - **`ultra` coordinates several agents in parallel.** Much slower and costlier.
-- **5.6 Sol and `gpt-daybreak-blue-latest` default to `low`** and are strong there. Start lower than
-  you'd think.
+- **Most Sol, Astra and Terra models default to `low`** in the catalog and are
+  strong there, the 6.2 models included. Start lower than you'd think;
+  `codex_models` lists each model's default.
 - **Daybreak Blue is access-gated.** It appears in the catalog only on accounts
   approved for it, so it is normal for `codex_models` not to list it.
 - **Use the full slug.** Bare `gpt-5.6` does not resolve under ChatGPT auth.
